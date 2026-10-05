@@ -204,6 +204,19 @@ describe('a body-independent declared consequence outranks an unread payload', (
     expect(v.verifiedReason).toBe(VerifiedReason.PROVED);
   });
 
+  it('is YES when an anyOf body-independent channel held and a 2xx body went unread', () => {
+    const v = decideVerified({
+      pass: true,
+      declaredConsequence: true,
+      independentOfBody: true,
+      honesty: clean,
+      settled: true,
+      outcomeUnread: ['POST /api/login'],
+    });
+    expect(v.verified).toBe(Verified.YES);
+    expect(v.verifiedReason).toBe(VerifiedReason.PROVED);
+  });
+
   it('still NAMES the unread write — a caveat hidden is a caveat dropped', () => {
     const v = decideVerified({
       pass: true,
