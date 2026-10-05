@@ -1,3 +1,4 @@
+import { readTestId } from './testid-attr.js';
 import { ElementState, REDACTED_VALUE, type ElementDescriptor } from '@reticlehq/core';
 import {
   isButton,
@@ -357,7 +358,7 @@ export function isSensitiveField(el: Element): boolean {
   const identifiers = [
     el.getAttribute('name') ?? '',
     el.id,
-    el.getAttribute('data-testid') ?? '',
+    readTestId(el) ?? '',
     el.getAttribute('aria-label') ?? '',
   ];
   const sensitiveAutocomplete =

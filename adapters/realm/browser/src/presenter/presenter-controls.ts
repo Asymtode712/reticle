@@ -1,3 +1,4 @@
+import { readTestId, testIdSelector } from '@/dom/testid-attr.js';
 import { HumanControlKind, PresenterTone, SessionState, type FlowChip } from '@reticlehq/core';
 import { nativeSetTimeout, nativeClearTimeout } from '@/timers/native/native-timers.js';
 import {
@@ -401,7 +402,7 @@ export class ControlPanel {
     if (el === undefined) return;
     const doc = el.ownerDocument;
     const testids = new Set(
-      Array.from(doc.querySelectorAll('[data-testid]')).map((n) => n.getAttribute('data-testid')),
+      Array.from(doc.querySelectorAll(testIdSelector())).map((n) => readTestId(n)),
     );
     const visible = this.#flowItems.filter((f) => f.start === undefined || testids.has(f.start));
     el.querySelectorAll('[data-reticle-replay]').forEach((b) => b.remove()); // rebuild, keep the caption

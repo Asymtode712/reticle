@@ -32,6 +32,13 @@ export interface ReticleConnectOptions {
    * tree-shaken out; this flag only exists for the rare intentional prod diagnostic.
    */
   allowInProduction?: boolean;
+  /**
+   * The attribute this app marks controls with, when it is not `data-testid` — `data-test-subj`
+   * (Elastic UI), `data-cy` (Cypress), `data-test`. Read by the `testid` locator, by the testids the
+   * page advertises, and by the anchors a recording writes. Normally supplied by the build plugin
+   * from `testIdAttribute` in `.reticle.json`. Absent or not a plain attribute name: `data-testid`.
+   */
+  testIdAttribute?: string;
   /** Show a small in-page status chip (connection + event count). */
   overlay?: boolean;
   /**

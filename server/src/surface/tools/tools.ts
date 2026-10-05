@@ -504,6 +504,12 @@ export const RAW_TOOLS: ToolDef[] = [
             .describe(
               'Present when a ROLE+NAME search missed and that role DOES carry a nearly-matching name — role+name is exact, so "Mesh" does not find "2 Mesh". Retry with one of these spellings; no snapshot needed.',
             ),
+          testidFoundUnder: z
+            .string()
+            .optional()
+            .describe(
+              'Present when a TESTID search missed but the value IS on the page under a different attribute (e.g. data-test-subj). Set `testIdAttribute` in .reticle.json to that attribute.',
+            ),
         })
         .optional()
         .describe(
