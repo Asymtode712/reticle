@@ -1,4 +1,4 @@
-import { readTestId, testIdSelector } from '@/dom/testid-attr.js';
+import { readTestId, testIdSelector } from '@/dom/addressing/testid-attr.js';
 import { HumanControlKind, PresenterTone, SessionState, type FlowChip } from '@reticlehq/core';
 import { nativeSetTimeout, nativeClearTimeout } from '@/timers/native/native-timers.js';
 import {

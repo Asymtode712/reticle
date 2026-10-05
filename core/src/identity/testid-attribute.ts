@@ -20,5 +20,8 @@ export const ALTERNATIVE_TESTID_ATTRS = [
   'data-e2e',
 ] as const;
 
-/** An attribute name safe to interpolate into a CSS attribute selector. */
-export const TESTID_ATTR_PATTERN = /^[a-zA-Z_][\w.:-]*$/;
+/**
+ * An attribute name safe to interpolate into a CSS attribute selector. `.` and `:` are legal in an
+ * attribute name but not in an unescaped selector, so `data.test` would make every query throw.
+ */
+export const TESTID_ATTR_PATTERN = /^[a-zA-Z_][\w-]*$/;

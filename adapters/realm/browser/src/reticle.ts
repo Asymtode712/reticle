@@ -47,7 +47,7 @@ import {
   type CapabilitiesInput,
 } from './registry/capabilities.js';
 import { installAllObservers, runTeardowns } from './observers/install-all.js';
-import { setTestIdAttr } from './dom/testid-attr.js';
+import { setTestIdAttr } from './dom/addressing/testid-attr.js';
 import { setNetworkBodyMaxChars } from './observers/net-detail/network-body.js';
 import { installOverlay, type OverlayHandle } from './presenter/chrome/overlay.js';
 // TYPES only. Naming the panel's class here would put the whole panel in the first thing a page

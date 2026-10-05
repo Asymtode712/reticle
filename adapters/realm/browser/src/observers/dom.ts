@@ -1,4 +1,4 @@
-import { readTestId, testIdSelector } from '@/dom/testid-attr.js';
+import { readTestId, testIdSelector } from '@/dom/addressing/testid-attr.js';
 import { EventType, TruncationChannel } from '@reticlehq/core';
 import { getAccessibleName, getRole, isVisible } from '@/dom/a11y.js';
 import { refs } from '@/dom/addressing/refs.js';

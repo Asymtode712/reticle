@@ -10,7 +10,7 @@
  * as the app's testable surface would be the tool describing itself.
  */
 
-import { getTestIdAttr, testIdSelector } from '@/dom/testid-attr.js';
+import { getTestIdAttr, testIdSelector } from '@/dom/addressing/testid-attr.js';
 
 /**
  * Ceiling on the reported list.

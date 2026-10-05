@@ -1,4 +1,4 @@
-import { readTestId } from '@/dom/testid-attr.js';
+import { readTestId } from '@/dom/addressing/testid-attr.js';
 import { isSyntheticInput } from '@/actions/synthetic/synthetic-input.js';
 import { EventType } from '@reticlehq/core';
 import { isReticleUi, isReticleOverlay } from '@/dom/dom-ignore.js';

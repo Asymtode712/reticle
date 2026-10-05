@@ -15,8 +15,8 @@
  * LENGTH always rides out, because "it was wiped" is the assertion this exists for and a length
  * says it while carrying nobody's data.
  */
-import { readTestId } from '@/dom/testid-attr.js';
-import { EventType, isSensitiveKey } from '@reticlehq/core';
+import { readTestId } from '@/dom/addressing/testid-attr.js';
+import { DEFAULT_TESTID_ATTR, EventType, isSensitiveKey } from '@reticlehq/core';
 import { getAccessibleName } from '@/dom/a11y.js';
 import type { Emit, Teardown } from './types.js';
 
@@ -66,7 +66,12 @@ function isSecret(element: Field): boolean {
   if (element instanceof HTMLInputElement && 'password' === element.type) return true;
   const hint = element.getAttribute('autocomplete');
   if (null !== hint && PAYMENT_AUTOCOMPLETE.test(hint)) return true;
-  for (const key of [element.name, readTestId(element), element.getAttribute('id')]) {
+  for (const key of [
+    element.name,
+    readTestId(element),
+    element.getAttribute(DEFAULT_TESTID_ATTR),
+    element.getAttribute('id'),
+  ]) {
     if (null !== key && key.length > 0 && isSensitiveKey(key)) return true;
   }
   return false;

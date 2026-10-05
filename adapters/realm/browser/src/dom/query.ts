@@ -1,5 +1,6 @@
 import {
   ALTERNATIVE_TESTID_ATTRS,
+  DEFAULT_TESTID_ATTR,
   DATA_RETICLE_SOURCE_ATTR,
   ElementState,
   QueryBy,
@@ -27,7 +28,7 @@ import { isSensitiveKey } from '@/security/serialization.js';
 import { declaredTestids } from '@/registry/capabilities.js';
 import { identifyComponent } from '@/registry/stores/adapters.js';
 import { refs } from './addressing/refs.js';
-import { getTestIdAttr, readTestId, testIdSelector } from './testid-attr.js';
+import { getTestIdAttr, readTestId, testIdSelector } from './addressing/testid-attr.js';
 
 const SOURCE_ATTR = DATA_RETICLE_SOURCE_ATTR;
 const MAX_PRESENT_TESTIDS = 12;
@@ -709,7 +710,7 @@ function nameNearMisses(container: HTMLElement, query: ElementQuery): string[] {
 function testidFoundUnder(container: HTMLElement, query: ElementQuery): string | undefined {
   if (QueryBy.TESTID !== query.by || undefined === query.value) return undefined;
   const configured = getTestIdAttr();
-  for (const attr of ALTERNATIVE_TESTID_ATTRS) {
+  for (const attr of [DEFAULT_TESTID_ATTR, ...ALTERNATIVE_TESTID_ATTRS]) {
     if (attr === configured) continue;
     const found = elementsUnder(container).some(
       (el) => el.getAttribute(attr) === query.value && !isIgnored(el),
