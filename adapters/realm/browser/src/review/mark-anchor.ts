@@ -9,8 +9,6 @@ import { getAccessibleName, getRole } from '@/dom/a11y.js';
 import { identifyComponent } from '@/registry/stores/adapters.js';
 import { sourceFor } from '@/dom/addressing/source.js';
 
-/** Attribute names — defined locally per the recorder/query convention (no shared free string). */
-
 /**
  * The element address carried by a human review mark: a re-resolvable anchor (auto-anchor's most
  * durable tier for this element), its durability strategy, a human-legible label, and — crucially —

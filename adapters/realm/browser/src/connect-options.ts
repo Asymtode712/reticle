@@ -35,8 +35,8 @@ export interface ReticleConnectOptions {
   /**
    * The attribute this app marks controls with, when it is not `data-testid` — `data-test-subj`
    * (Elastic UI), `data-cy` (Cypress), `data-test`. Read by the `testid` locator, by the testids the
-   * page advertises, and by the anchors a recording writes. Normally supplied by the build plugin
-   * from `testIdAttribute` in `.reticle.json`. Absent or not a plain attribute name: `data-testid`.
+   * page advertises, and by the anchors a recording writes. Supplied by the Vite plugin only, from
+   * `testIdAttribute` in `.reticle.json`; Next.js, Remix and manual setups pass it here. Absent or not a plain attribute name: `data-testid`.
    */
   testIdAttribute?: string;
   /** Show a small in-page status chip (connection + event count). */
