@@ -9,7 +9,7 @@
  * baseline stores). No clock, no IO — unit-testable in isolation.
  */
 
-import { RefusalReason, ReticleEnv, TRANSPORT_LIMITS } from '@reticlehq/core';
+import { RefusalReason, ReticleEnv, TRANSPORT_LIMITS, UNISSUED_REF_REFUSAL } from '@reticlehq/core';
 import { SELF_RECOVERING_MARKER } from '@/portal/session/no-session-diagnosis.js';
 import { BODY_CLAUSE_REFUSAL_OPENING } from '@reticlehq/engine/evidence/body-capture-remedy.js';
 import {
@@ -111,7 +111,16 @@ export const RECOVERY = {
     'navigated, opened a modal, re-sorted a list or changed the page invalidates every ref taken ' +
     'before it. Reticle refuses here rather than clicking whatever now occupies that slot. Call ' +
     'reticle_query again for a fresh ref and retry the action — and prefer reticle_act_and_wait ' +
-    '{ until } when an action changes the page, so the next ref is taken after it settles.',
+    '{ until } when an action changes the page, so the next ref is taken after it settles. On a ' +
+    'page that keeps re-rendering (a dashboard that refetches), skip the ref and pass ' +
+    '`target: { role, name }`, `{ label }` or `{ text }` instead: it is resolved at action time, ' +
+    'in the same call, so there is nothing to go stale.',
+  UNISSUED_REF:
+    'The `ref` was not one Reticle handed out, so nothing was looked up and nothing was acted on. ' +
+    'Refs are minted by reticle_snapshot / reticle_query and look like e12. To name an element by ' +
+    'what it shows, pass `target` instead — { label }, { role, name }, { text } or { testid } — and ' +
+    'it is found in the same call. This is an invalid call, not a Reticle defect: there is nothing ' +
+    'to report.',
   STALE_REF_AFTER_EDIT:
     'That ref went stale because YOUR OWN EDIT landed: the dev server hot-updated the module named ' +
     'in the message above and the framework re-rendered, so the node the ref pointed at was ' +
@@ -295,6 +304,8 @@ const REASON_OF: Record<keyof typeof RECOVERY, RefusalReason> = {
   MISSING_RECORDING: RefusalReason.NO_MATCH,
   STALE_REF: RefusalReason.NO_MATCH,
   STALE_REF_AFTER_EDIT: RefusalReason.NO_MATCH,
+  // The caller passed something that was never a ref: a malformed call, not a page that moved.
+  UNISSUED_REF: RefusalReason.BAD_ARGS,
   NO_SUCH_OPTION: RefusalReason.NO_MATCH,
   TARGET_MISSED: RefusalReason.NO_MATCH,
   // Target resolution failed to name one element. NO_MATCH rather than BAD_ARGS: the arguments were
@@ -324,6 +335,8 @@ const RULES: readonly { readonly match: RegExp; readonly hint: string }[] = [
   // its call failed the schema. Not anchored, so a launch error that wraps it is still caught. The
   // prefix has no regex metacharacters, so it is used as is.
   { match: new RegExp(CHROMIUM_PATH_REFUSAL_PREFIX), hint: RECOVERY.CHROMIUM_PATH },
+  // Early for the same reason: the message echoes the caller's string, which can hold any word.
+  { match: new RegExp(UNISSUED_REF_REFUSAL), hint: RECOVERY.UNISSUED_REF },
   { match: /no browser session connected/i, hint: RECOVERY.NO_SESSION },
   { match: /multiple sessions connected/i, hint: RECOVERY.MULTIPLE_SESSIONS },
   { match: /no connected session with id/i, hint: RECOVERY.UNKNOWN_SESSION },

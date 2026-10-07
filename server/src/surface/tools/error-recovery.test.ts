@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RefusalReason, TRANSPORT_LIMITS } from '@reticlehq/core';
+import { RefusalReason, TRANSPORT_LIMITS, unissuedRefRefusal } from '@reticlehq/core';
 import {
   FEEDBACK_ASK,
   RECOVERY,
@@ -185,6 +185,33 @@ describe('a stale ref is a recognized, recoverable condition — not an unknown 
 
   it('and it is recognized, so no feedback ask is attached', () => {
     expect(recoveryFor("ref 'e12' no longer resolves to an element")).toBeDefined();
+  });
+
+  // On a dashboard that refetches, even a fresh ref goes stale before it is spent; re-querying
+  // loses the same race. `target` resolves at action time, so it is the move that works first try.
+  it('names `target` as the way to act on a page that keeps re-rendering', () => {
+    expect(String(RECOVERY.STALE_REF)).toContain('target: { role, name }');
+  });
+});
+
+describe('a ref Reticle never issued is a malformed call, not a stale ref', () => {
+  const message = unissuedRefRefusal('find:aria-label=Open menu');
+
+  it('gets its own recovery, pointing at `target`, and never the stale-ref one', () => {
+    const hint = recoveryFor(message);
+    expect(hint).toBe(RECOVERY.UNISSUED_REF);
+    expect(String(hint)).toContain('`target`');
+    expect(String(hint)).not.toContain('re-render');
+  });
+
+  it('is the caller to fix', () => {
+    expect(refusalReasonFor(message)).toBe(RefusalReason.BAD_ARGS);
+  });
+
+  it('wins over words the echoed string happens to contain', () => {
+    expect(recoveryFor(unissuedRefRefusal('throttled no longer resolves to an element'))).toBe(
+      RECOVERY.UNISSUED_REF,
+    );
   });
 });
 
