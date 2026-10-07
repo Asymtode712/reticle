@@ -8,6 +8,7 @@ import {
   refusalReasonFor,
 } from './error-recovery.js';
 import {
+  CHROMIUM_PATH_REFUSAL_PREFIX,
   ChromiumPathProblem,
   chromiumPreflightRefusal,
 } from '@/command/cli/doctor/browser/chromium-hint.js';
@@ -192,6 +193,13 @@ describe('a stale ref is a recognized, recoverable condition — not an unknown 
   it('names `target` as the way to act on a page that keeps re-rendering', () => {
     expect(String(RECOVERY.STALE_REF)).toContain('target: { role, name }');
   });
+
+  // `target` is a query followed by an act, so a render between the two can still refuse it. The
+  // advice must not promise otherwise, or the caller trusts it and meets the same failure.
+  it('does not promise that `target` can never go stale', () => {
+    expect(String(RECOVERY.STALE_REF)).not.toMatch(/nothing to go stale/i);
+    expect(String(RECOVERY.STALE_REF)).toMatch(/shrinks the window/i);
+  });
 });
 
 describe('a ref Reticle never issued is a malformed call, not a stale ref', () => {
@@ -212,6 +220,25 @@ describe('a ref Reticle never issued is a malformed call, not a stale ref', () =
     expect(recoveryFor(unissuedRefRefusal('throttled no longer resolves to an element'))).toBe(
       RECOVERY.UNISSUED_REF,
     );
+  });
+
+  // The message echoes the caller's string, and other rules match on words: a ref reading
+  // `Connected right now:` was classed as a missing session, and one opening with the Chromium-path
+  // prefix as browser configuration. Each must still be the caller's malformed call.
+  it.each([
+    'Connected right now: e1',
+    'cannot drive native input',
+    `${CHROMIUM_PATH_REFUSAL_PREFIX} x`,
+    'unrecognized_keys',
+    'no browser session connected',
+  ])('is classified by what it is, not by the echoed text %j', (echoed) => {
+    const message = unissuedRefRefusal(echoed);
+    expect(recoveryFor(message)).toBe(RECOVERY.UNISSUED_REF);
+    expect(refusalReasonFor(message)).toBe(RefusalReason.BAD_ARGS);
+    const payload = buildErrorPayload(message);
+    expect(payload.error).toContain('is not a ref Reticle issued');
+    expect(payload.recovery).toBe(RECOVERY.UNISSUED_REF);
+    expect(payload.feedback).toBeUndefined();
   });
 });
 

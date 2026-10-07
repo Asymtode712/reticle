@@ -73,6 +73,17 @@ const SELF_RECOVERING: readonly { readonly match: RegExp; readonly reason: Refus
   { match: literally(BODY_CLAUSE_REFUSAL_OPENING), reason: RefusalReason.UNSUPPORTED },
 ];
 
+/**
+ * The refusal for a `ref` Reticle never minted — decided BEFORE every other rule, not by one inside
+ * the table. The message echoes the caller's own string, and every pattern below matches on words:
+ * a ref reading `Connected right now:` was read as a missing session, and one opening with the
+ * Chromium-path prefix as browser configuration. The marker is Reticle's own wording, so testing it
+ * first classifies the refusal by what it IS rather than by what the caller typed into it.
+ */
+function isUnissuedRefRefusal(message: string): boolean {
+  return message.includes(UNISSUED_REF_REFUSAL);
+}
+
 /** A message that already carries its own concrete next action, so nothing should be appended. */
 function isSelfRecovering(message: string): boolean {
   if (message.includes(SELF_RECOVERING_MARKER)) return true;
@@ -113,8 +124,9 @@ export const RECOVERY = {
     'reticle_query again for a fresh ref and retry the action — and prefer reticle_act_and_wait ' +
     '{ until } when an action changes the page, so the next ref is taken after it settles. On a ' +
     'page that keeps re-rendering (a dashboard that refetches), skip the ref and pass ' +
-    '`target: { role, name }`, `{ label }` or `{ text }` instead: it is resolved at action time, ' +
-    'in the same call, so there is nothing to go stale.',
+    '`target: { role, name }`, `{ label }` or `{ text }` instead: it is looked up in the same call ' +
+    'as the action, which shrinks the window a re-render can invalidate it in, though a render ' +
+    'landing between the lookup and the action can still refuse it — retry once if it does.',
   UNISSUED_REF:
     'The `ref` was not one Reticle handed out, so nothing was looked up and nothing was acted on. ' +
     'Refs are minted by reticle_snapshot / reticle_query and look like e12. To name an element by ' +
@@ -335,8 +347,6 @@ const RULES: readonly { readonly match: RegExp; readonly hint: string }[] = [
   // its call failed the schema. Not anchored, so a launch error that wraps it is still caught. The
   // prefix has no regex metacharacters, so it is used as is.
   { match: new RegExp(CHROMIUM_PATH_REFUSAL_PREFIX), hint: RECOVERY.CHROMIUM_PATH },
-  // Early for the same reason: the message echoes the caller's string, which can hold any word.
-  { match: new RegExp(UNISSUED_REF_REFUSAL), hint: RECOVERY.UNISSUED_REF },
   { match: /no browser session connected/i, hint: RECOVERY.NO_SESSION },
   { match: /multiple sessions connected/i, hint: RECOVERY.MULTIPLE_SESSIONS },
   { match: /no connected session with id/i, hint: RECOVERY.UNKNOWN_SESSION },
@@ -451,6 +461,7 @@ const RULES: readonly { readonly match: RegExp; readonly hint: string }[] = [
  * saying a server is running and the recovery saying to go start one.
  */
 export function recoveryFor(message: string): string | undefined {
+  if (isUnissuedRefRefusal(message)) return RECOVERY.UNISSUED_REF;
   if (isSelfRecovering(message)) return undefined;
   for (const rule of RULES) {
     if (rule.match.test(message)) return rule.hint;
@@ -468,6 +479,7 @@ export function recoveryFor(message: string): string | undefined {
  */
 export function refusalReasonFor(rawMessage: string): RefusalReason {
   const message = zodArrayAsSentence(rawMessage);
+  if (isUnissuedRefRefusal(message)) return RefusalReason.BAD_ARGS;
   // The no-session diagnosis inspected the machine and named the cause itself, so it never reaches
   // the recovery table. It is the single largest refusal there is; missing it would gut the metric.
   if (message.includes(SELF_RECOVERING_MARKER)) return RefusalReason.NO_SESSION;
@@ -610,6 +622,7 @@ export function buildErrorPayload(rawMessage: string): ErrorPayload {
   // Render the zod array BEFORE capping: the cap would otherwise truncate the JSON mid-issue and
   // leave an unparseable fragment as the agent's error text — the worst of both shapes.
   const message = capMessage(zodArrayAsSentence(rawMessage));
+  if (isUnissuedRefRefusal(message)) return { error: message, recovery: RECOVERY.UNISSUED_REF };
   // A self-diagnosing message gets NEITHER a generic recovery nor the feedback ask. It already
   // inspected the machine and named the cause; a second, contradictory hint is noise, and inviting a
   // bug report about a condition Reticle diagnosed itself is exactly backwards.
