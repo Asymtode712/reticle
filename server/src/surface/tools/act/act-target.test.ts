@@ -89,7 +89,7 @@ describe('resolveActTarget — a ref Reticle never issued', () => {
       const message = 'error' === r.kind ? r.message : '';
       expect(message).toBe(
         `${JSON.stringify(ref)} is not a ref Reticle issued; refs look like e12. To address an ` +
-          'element by its label, pass target: { label }, { role, name } or { text }.',
+          'element by what it shows, pass target: { label }, { role, name }, { text } or { testid }.',
       );
       expect(command).not.toHaveBeenCalled();
     },

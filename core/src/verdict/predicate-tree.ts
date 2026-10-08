@@ -172,7 +172,7 @@ export function unissuedRefRefusal(ref: string): string {
   const echoed = max >= ref.length ? ref : `${ref.slice(0, max)}…`;
   return (
     `${JSON.stringify(echoed)} ${UNISSUED_REF_REFUSAL}; refs look like e12. To address an element ` +
-    'by its label, pass target: { label }, { role, name } or { text }.'
+    'by what it shows, pass target: { label }, { role, name }, { text } or { testid }.'
   );
 }
 

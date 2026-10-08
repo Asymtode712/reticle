@@ -216,6 +216,16 @@ describe('a ref Reticle never issued is a malformed call, not a stale ref', () =
     expect(refusalReasonFor(message)).toBe(RefusalReason.BAD_ARGS);
   });
 
+  // The refusal and its recovery are printed together; naming different `target` forms makes the
+  // caller wonder which one is right.
+  it.each(['{ label }', '{ role, name }', '{ text }', '{ testid }'])(
+    'names the same `target` form %s in the refusal and the recovery',
+    (form) => {
+      expect(message).toContain(form);
+      expect(String(RECOVERY.UNISSUED_REF)).toContain(form);
+    },
+  );
+
   it('wins over words the echoed string happens to contain', () => {
     expect(recoveryFor(unissuedRefRefusal('throttled no longer resolves to an element'))).toBe(
       RECOVERY.UNISSUED_REF,
