@@ -97,6 +97,8 @@ export interface ToolDeps<Ext = unknown> {
    * lease that supplies the SDK (see zero-install-first-call.ts). Absent: answer no-session as before.
    */
   openUnwiredApp?: () => Promise<{ url: string; notice: string } | undefined>;
+  /** The one dev server running in the caller's project folder, for a lease that names no url. */
+  projectAppUrl?: () => Promise<string | undefined>;
   /** cross-run outcome memory (.reticle/project.json). */
   project: ProjectStore;
   /** optional native-input provider. undefined ⇒ everything stays synthetic. */
@@ -174,13 +176,13 @@ export interface ToolDeps<Ext = unknown> {
 export interface ToolDef<Ext = unknown> {
   name: string;
   description: string;
-  inputSchema: z.ZodRawShape;
+  inputSchema: Record<string, z.ZodType>;
   /**
    * JSON Schema-compatible output schema for this tool. When present, the MCP server advertises it
    * in the tools/list response so schema-aware clients (like @reticlehq/cli) can validate outputs and
    * compose tool calls safely. Also drives TOON encoding for snapshot/query results.
    */
-  outputSchema?: z.ZodRawShape;
+  outputSchema?: Record<string, z.ZodType>;
   /**
    * One concrete, valid call — the shape, not the prose.
    *
@@ -504,7 +506,7 @@ export const SCREENSHOT_DOC =
  * Derived from `EnvelopeKey` rather than re-listed: this shape and the splice sites disagreed for a
  * whole release, and every key that went missing was a channel nobody could see was missing.
  */
-export const sessionEnvelopeShape: z.ZodRawShape = Object.fromEntries(
+export const sessionEnvelopeShape: Record<string, z.ZodType> = Object.fromEntries(
   Object.values(EnvelopeKey).map((key) => [
     key,
     // `warning` is the one with a narrower type; the rest are opaque envelopes the client forwards.

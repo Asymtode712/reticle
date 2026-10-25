@@ -775,9 +775,26 @@ describe('reticle_lease_acquire', () => {
     ).rejects.toThrow(/pool unavailable/i);
   });
 
-  it('requires a url', async () => {
+  it('requires a url when no dev server runs in the project', async () => {
     const { pool } = fakePool();
     await expect(tool(ReticleTool.LEASE_ACQUIRE)({ ...baseDeps, pool }, {})).rejects.toThrow(/url/);
+    await expect(
+      tool(ReticleTool.LEASE_ACQUIRE)(
+        { ...baseDeps, pool, projectAppUrl: () => Promise.resolve(undefined) },
+        {},
+      ),
+    ).rejects.toThrow(/url/);
+  });
+
+  // An agent that leased with no url was refused, guessed a port, and started a second dev server.
+  it('leases the dev server that runs in the project folder when the url is omitted', async () => {
+    const { pool, acquired } = fakePool();
+    const result = (await tool(ReticleTool.LEASE_ACQUIRE)(
+      { ...baseDeps, pool, projectAppUrl: () => Promise.resolve('http://localhost:5173') },
+      {},
+    )) as { sessionId: string };
+    expect(result.sessionId).toBeDefined();
+    expect(acquired.map((a) => new URL(a.url).origin)).toEqual(['http://localhost:5173']);
   });
 });
 
@@ -1243,7 +1260,9 @@ describe('reticle_lease with seedStorage', () => {
         url: 'http://localhost:3000/',
         seedStorage: { local: 12345 as unknown as Record<string, string> },
       }),
-    ).rejects.toThrow(/seedStorage is invalid: local: Expected object, received number/);
+    ).rejects.toThrow(
+      /seedStorage is invalid: local: Invalid input: expected record, received number/,
+    );
   });
 
   it('rejects an unrecognised seedStorage key instead of silently stripping it (#1142)', async () => {
