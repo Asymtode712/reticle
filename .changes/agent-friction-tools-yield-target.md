@@ -1,0 +1,3 @@
+### Fixed
+
+- **`@reticlehq/server` — three small refusals cost an agent extra calls.** `reticle_tools { name: "reticle_act" }` is now accepted: `name` is one tool name, the same as `names: ["reticle_act"]`. A key that another action of the same tool takes, such as `reticle_session { action: "yield", claim, summary }`, is still refused, and the refusal now says how to go on: call the action that takes it (here `"end"`), or call again without it. A ref given as a string target, such as `{ target: "e7" }`, is now used as that ref. A target that names nothing to find, such as a CSS selector, is refused with the shapes that a target takes. Before, both searched the page for nothing and answered "target matched no element", which read as a stale ref.

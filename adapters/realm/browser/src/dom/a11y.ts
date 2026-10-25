@@ -17,7 +17,14 @@ import {
   isTextArea,
 } from './realm.js';
 import { refs } from './addressing/refs.js';
-import { capturedRootOf } from './shadow-registry.js';
+import { parentAcrossShadowBoundary } from './shadow-registry.js';
+import {
+  clippingBox,
+  overflowAxes,
+  scrolledInto,
+  type VisibilityInfo,
+  type VisibleBounds,
+} from './paint-context.js';
 import { inspectChart } from './chart.js';
 import { isSensitiveKey } from '@/security/serialization.js';
 import { formatSource, sourceFromDom } from './addressing/source.js';
@@ -68,13 +75,27 @@ const INPUT_TEXT_TYPES = new Set(['text', 'email', 'tel', 'url', 'password', '']
 
 function inputRole(input: HTMLInputElement): string {
   const type = input.type.toLowerCase();
-  if ('search' === type) return 'searchbox';
-  if (INPUT_TEXT_TYPES.has(type)) return 'textbox';
-  if ('checkbox' === type) return 'checkbox';
-  if ('radio' === type) return 'radio';
-  if ('range' === type) return 'slider';
-  if ('number' === type) return 'spinbutton';
-  if ('submit' === type || 'button' === type || 'reset' === type) return 'button';
+  if ('search' === type) {
+    return 'searchbox';
+  }
+  if (INPUT_TEXT_TYPES.has(type)) {
+    return 'textbox';
+  }
+  if ('checkbox' === type) {
+    return 'checkbox';
+  }
+  if ('radio' === type) {
+    return 'radio';
+  }
+  if ('range' === type) {
+    return 'slider';
+  }
+  if ('number' === type) {
+    return 'spinbutton';
+  }
+  if ('submit' === type || 'button' === type || 'reset' === type) {
+    return 'button';
+  }
   return 'textbox';
 }
 
@@ -90,9 +111,13 @@ function inputRole(input: HTMLInputElement): string {
  */
 function hasAuthorNaming(el: Element): boolean {
   const label = el.getAttribute('aria-label');
-  if (label !== null && label.trim().length > 0) return true;
+  if (label !== null && label.trim().length > 0) {
+    return true;
+  }
   const labelledby = el.getAttribute('aria-labelledby');
-  if (labelledby !== null && labelledby.trim().length > 0) return true;
+  if (labelledby !== null && labelledby.trim().length > 0) {
+    return true;
+  }
   const title = el.getAttribute('title');
   return title !== null && title.trim().length > 0;
 }
@@ -100,7 +125,9 @@ function hasAuthorNaming(el: Element): boolean {
 /** Compute the ARIA role (explicit wins, else implicit from the tag). */
 export function getRole(el: Element): string {
   const explicit = el.getAttribute('role');
-  if (explicit !== null && explicit.trim().length > 0) return explicit.trim();
+  if (explicit !== null && explicit.trim().length > 0) {
+    return explicit.trim();
+  }
   const tag = el.tagName.toLowerCase();
   switch (tag) {
     case 'a':
@@ -196,11 +223,15 @@ function collapse(text: string): string {
 
 function labelledByText(el: Element): string | null {
   const ids = el.getAttribute('aria-labelledby');
-  if (null === ids) return null;
+  if (null === ids) {
+    return null;
+  }
   const parts: string[] = [];
   for (const id of ids.split(/\s+/)) {
     const ref = el.ownerDocument.getElementById(id);
-    if (ref !== null) parts.push(collapse(textWithoutHidden(ref)));
+    if (ref !== null) {
+      parts.push(collapse(textWithoutHidden(ref)));
+    }
   }
   const joined = parts.join(' ').trim();
   return joined.length > 0 ? joined : null;
@@ -223,10 +254,16 @@ function labelledByText(el: Element): string | null {
  * joined with spaces so an icon followed by a word never fuses into one unmatchable token.
  */
 function textWithoutHidden(node: Node): string {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
-  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent ?? '';
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return '';
+  }
   const el = node as Element;
-  if ('true' === el.getAttribute('aria-hidden')) return '';
+  if ('true' === el.getAttribute('aria-hidden')) {
+    return '';
+  }
   if (isImage(el)) {
     const alt = el.getAttribute('alt');
     return null === alt ? '' : alt;
@@ -235,9 +272,13 @@ function textWithoutHidden(node: Node): string {
   let lastWasElement = false;
   for (const child of el.childNodes) {
     const piece = textWithoutHidden(child);
-    if (0 === piece.length) continue;
+    if (0 === piece.length) {
+      continue;
+    }
     const isEl = Node.ELEMENT_NODE === child.nodeType;
-    if (result.length > 0 && (isEl || lastWasElement)) result += ' ';
+    if (result.length > 0 && (isEl || lastWasElement)) {
+      result += ' ';
+    }
     result += piece;
     lastWasElement = isEl;
   }
@@ -246,14 +287,20 @@ function textWithoutHidden(node: Node): string {
 
 export function getAccessibleName(el: Element): string {
   const labelled = labelledByText(el);
-  if (labelled !== null) return labelled;
+  if (labelled !== null) {
+    return labelled;
+  }
 
   const ariaLabel = el.getAttribute('aria-label');
-  if (ariaLabel !== null && ariaLabel.trim().length > 0) return ariaLabel.trim();
+  if (ariaLabel !== null && ariaLabel.trim().length > 0) {
+    return ariaLabel.trim();
+  }
 
   if (isImage(el)) {
     const alt = el.getAttribute('alt');
-    if (alt !== null) return alt.trim();
+    if (alt !== null) {
+      return alt.trim();
+    }
   }
 
   // `.labels` exists on every labelable element (input, textarea, select, button, meter, output,
@@ -281,7 +328,9 @@ export function getAccessibleName(el: Element): string {
         .map((l) => collapse(textWithoutHidden(l)))
         .join(' ')
         .trim();
-      if (text.length > 0) return text;
+      if (text.length > 0) {
+        return text;
+      }
     }
   }
 
@@ -289,7 +338,9 @@ export function getAccessibleName(el: Element): string {
     const legend = [...el.children].find((child) => 'legend' === child.tagName.toLowerCase());
     if (legend !== undefined) {
       const text = collapse(textWithoutHidden(legend));
-      if (text.length > 0) return text;
+      if (text.length > 0) {
+        return text;
+      }
     }
   }
 
@@ -297,7 +348,9 @@ export function getAccessibleName(el: Element): string {
     const caption = [...el.children].find((child) => 'caption' === child.tagName.toLowerCase());
     if (caption !== undefined) {
       const text = collapse(textWithoutHidden(caption));
-      if (text.length > 0) return text;
+      if (text.length > 0) {
+        return text;
+      }
     }
   }
 
@@ -307,7 +360,9 @@ export function getAccessibleName(el: Element): string {
     );
     if (figcaption !== undefined) {
       const text = collapse(textWithoutHidden(figcaption));
-      if (text.length > 0) return text;
+      if (text.length > 0) {
+        return text;
+      }
     }
   }
 
@@ -320,29 +375,39 @@ export function getAccessibleName(el: Element): string {
       const type = el.type.toLowerCase();
       if ('submit' === type || 'button' === type || 'reset' === type) {
         const value = collapse(el.value);
-        if (value.length > 0) return value;
+        if (value.length > 0) {
+          return value;
+        }
       }
     }
     if (isInput(el) || isTextArea(el)) {
       const placeholder = el.getAttribute('placeholder');
-      if (placeholder !== null && placeholder.trim().length > 0) return placeholder.trim();
+      if (placeholder !== null && placeholder.trim().length > 0) {
+        return placeholder.trim();
+      }
     }
   }
 
   if (NAME_FROM_CONTENT.has(getRole(el))) {
     const text = collapse(textWithoutHidden(el));
-    if (text.length > 0) return text;
+    if (text.length > 0) {
+      return text;
+    }
   }
 
   const title = el.getAttribute('title');
-  if (title !== null && title.trim().length > 0) return title.trim();
+  if (title !== null && title.trim().length > 0) {
+    return title.trim();
+  }
 
   return '';
 }
 
 function ariaBool(el: Element, attr: string): boolean | undefined {
   const value = el.getAttribute(attr);
-  if (null === value) return undefined;
+  if (null === value) {
+    return undefined;
+  }
   return 'true' === value;
 }
 
@@ -361,12 +426,18 @@ export function getStates(el: Element, visible: boolean = isVisible(el)): Elemen
   states.push(disabled ? ElementState.DISABLED : ElementState.ENABLED);
 
   const checkedProp = isInput(el) && ('checkbox' === el.type || 'radio' === el.type) && el.checked;
-  if (checkedProp || true === ariaBool(el, 'aria-checked')) states.push(ElementState.CHECKED);
+  if (checkedProp || true === ariaBool(el, 'aria-checked')) {
+    states.push(ElementState.CHECKED);
+  }
   if (true === ariaBool(el, 'aria-expanded') || isOpenDetailsSummary(el)) {
     states.push(ElementState.EXPANDED);
   }
-  if (true === ariaBool(el, 'aria-pressed')) states.push(ElementState.PRESSED);
-  if (el.ownerDocument.activeElement === el) states.push(ElementState.FOCUSED);
+  if (true === ariaBool(el, 'aria-pressed')) {
+    states.push(ElementState.PRESSED);
+  }
+  if (el.ownerDocument.activeElement === el) {
+    states.push(ElementState.FOCUSED);
+  }
 
   return states;
 }
@@ -424,7 +495,9 @@ export function getValue(el: Element): string | undefined {
   if (isInput(el) || isTextArea(el) || isSelect(el)) {
     // An EMPTY secret field reads empty: `[REDACTED]` there said "has a value" about a field
     // nobody had typed into. Emptiness discloses nothing a screenshot would not.
-    if (isSensitiveField(el)) return '' === el.value ? '' : REDACTED_VALUE;
+    if (isSensitiveField(el)) {
+      return '' === el.value ? '' : REDACTED_VALUE;
+    }
     return el.value;
   }
   const valueNow = el.getAttribute('aria-valuenow');
@@ -443,9 +516,13 @@ export function getValue(el: Element): string | undefined {
  */
 function hiddenInsideClosedDetails(el: Element): boolean {
   const parent = el.parentElement;
-  if (null === parent) return false;
+  if (null === parent) {
+    return false;
+  }
   const details = parent.closest(HTML_DETAILS_TAG);
-  if (null === details || details.hasAttribute(HTML_DETAILS_OPEN_ATTRIBUTE)) return false;
+  if (null === details || details.hasAttribute(HTML_DETAILS_OPEN_ATTRIBUTE)) {
+    return false;
+  }
   // The first `<summary>` CHILD, read from `children` rather than `:scope > summary`: inside a
   // shadow root some selector engines answer `:scope` with nothing, and every summary slotted
   // content sits under then read as hidden.
@@ -462,7 +539,9 @@ function hiddenInsideClosedDetails(el: Element): boolean {
  * on the element; at rest, opacity 0 is hidden.
  */
 function stalledFade(el: Element): boolean {
-  if (!el.ownerDocument.hidden || !('getAnimations' in el)) return false;
+  if (!el.ownerDocument.hidden || !('getAnimations' in el)) {
+    return false;
+  }
   return el.getAnimations().some((a) => 'running' === a.playState || a.pending);
 }
 
@@ -484,8 +563,12 @@ function hiddenByAnOverlay(el: Element): boolean {
  * in one place — #1111/#1112 are changing `selfHidden`, and a copy will drift.
  */
 function selfCssHidden(el: Element, style: CSSStyleDeclaration | null): boolean {
-  if (isHtmlElement(el) && el.hidden) return true;
-  if (hiddenInsideClosedDetails(el)) return true;
+  if (isHtmlElement(el) && el.hidden) {
+    return true;
+  }
+  if (hiddenInsideClosedDetails(el)) {
+    return true;
+  }
   if (style !== null) {
     if (
       'none' === style.display ||
@@ -494,7 +577,9 @@ function selfCssHidden(el: Element, style: CSSStyleDeclaration | null): boolean 
     ) {
       return true;
     }
-    if (0 === Number.parseFloat(style.opacity || '1') && !stalledFade(el)) return true;
+    if (0 === Number.parseFloat(style.opacity || '1') && !stalledFade(el)) {
+      return true;
+    }
   }
   return false;
 }
@@ -505,7 +590,9 @@ function selfCssHidden(el: Element, style: CSSStyleDeclaration | null): boolean 
  * `<details>` boundary; composing the chain is still isVisible's job.
  */
 function selfHidden(el: Element, style: CSSStyleDeclaration | null): boolean {
-  if ('true' === el.getAttribute('aria-hidden') && !hiddenByAnOverlay(el)) return true;
+  if ('true' === el.getAttribute('aria-hidden') && !hiddenByAnOverlay(el)) {
+    return true;
+  }
   return selfCssHidden(el, style);
 }
 
@@ -521,9 +608,13 @@ export function isHiddenByAriaOnly(el: Element): boolean {
   let foundAriaHidden = false;
   let current: Element | null = el;
   while (null !== current) {
-    if ('true' === current.getAttribute('aria-hidden')) foundAriaHidden = true;
+    if ('true' === current.getAttribute('aria-hidden')) {
+      foundAriaHidden = true;
+    }
     const style = current.ownerDocument.defaultView?.getComputedStyle(current) ?? null;
-    if (selfCssHidden(current, style)) return false;
+    if (selfCssHidden(current, style)) {
+      return false;
+    }
     current = parentAcrossShadowBoundary(current);
   }
   return foundAriaHidden;
@@ -538,51 +629,16 @@ export function isHiddenByAriaOnly(el: Element): boolean {
 export function isRenderedOutsideAriaHidden(el: Element): boolean {
   let current: Element | null = el;
   while (null !== current) {
-    if ('true' === current.getAttribute('aria-hidden')) return false;
+    if ('true' === current.getAttribute('aria-hidden')) {
+      return false;
+    }
     const style = current.ownerDocument.defaultView?.getComputedStyle(current) ?? null;
-    if (selfCssHidden(current, style)) return false;
+    if (selfCssHidden(current, style)) {
+      return false;
+    }
     current = parentAcrossShadowBoundary(current);
   }
   return true;
-}
-
-/**
- * The slot a light-DOM child renders in when its host's shadow root is CLOSED. `assignedSlot` is
- * null there by design, but a root the registry captured can still be asked from inside which of
- * its slots holds the child. Null when the host has no captured closed root.
- */
-function slotInCapturedClosedRoot(el: Element): HTMLSlotElement | null {
-  const host = el.parentElement;
-  if (null === host || null !== host.shadowRoot) return null;
-  const root = capturedRootOf(host);
-  if (null === root) return null;
-  for (const slot of Array.from(root.querySelectorAll('slot'))) {
-    if (slot.assignedElements().includes(el)) return slot;
-  }
-  return null;
-}
-
-/**
- * The next node up the COMPOSED tree: the assigned slot for slotted content, else `parentElement`,
- * or the shadow host when the walk reaches the top of a shadow tree. A ShadowRoot is a DocumentFragment, so `parentElement` is null there,
- * and query candidates include shadow content (open roots always, captured closed roots too — see
- * `embeddedRootsUnder`). Without the hop, nothing that hides the host — a closed `<details>`,
- * display:none, aria-hidden — is ever seen by the walk inside the host's shadow tree.
- */
-export function parentAcrossShadowBoundary(el: Element): Element | null {
-  // A SLOTTED element renders where its slot is, not as a child of the host: its composed parent
-  // is `assignedSlot`, inside the host's shadow tree. Going straight to `parentElement` (the host)
-  // skipped every ancestor of the slot, so light-DOM content slotted into a closed `<details>` in a
-  // component's shadow root still read visible (#1175). A closed root reports no `assignedSlot`, so
-  // for one Reticle captured the slot is found from inside it; an uncaptured one falls back to the
-  // host as before.
-  const slot = el.assignedSlot ?? slotInCapturedClosedRoot(el);
-  if (null !== slot) return slot;
-  if (null !== el.parentElement) return el.parentElement;
-  // `host` exists on a ShadowRoot and not on a Document, the other thing getRootNode() returns
-  // for a connected element.
-  const host: Element | undefined = (el.getRootNode() as Partial<ShadowRoot>).host;
-  return host ?? null;
 }
 
 const CLIPPING_OVERFLOW = new Set(['hidden', 'clip']);
@@ -623,27 +679,15 @@ const REPLACED_INLINE_TAGS = new Set([
   'select',
 ]);
 
-type VisibleBounds = Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom' | 'width' | 'height'>;
-interface VisibilityInfo {
-  hidden: boolean;
-  style: CSSStyleDeclaration | null;
-  parent: Element | null;
-  clipX: boolean;
-  clipY: boolean;
-  /** Scrollable on that axis: content past the edge is reachable by scrolling. */
-  scrollX: boolean;
-  scrollY: boolean;
-  hasClipping: boolean;
-  clipBox?: VisibleBounds;
-}
-
 // Keyed by the caller's ONE synchronous pass, so shared style/box reads live exactly as long as
 // that pass. The boolean memo still stores only the result for the target itself: a parent's box
 // can be clipped while a descendant overflowing back into the clipping region remains visible.
 const visibilityInfoMemos = new WeakMap<Map<Element, boolean>, Map<Element, VisibilityInfo>>();
 
 function visibilityInfoMemo(memo?: Map<Element, boolean>): Map<Element, VisibilityInfo> {
-  if (memo === undefined) return new Map();
+  if (memo === undefined) {
+    return new Map();
+  }
   let info = visibilityInfoMemos.get(memo);
   if (info === undefined) {
     info = new Map();
@@ -702,15 +746,6 @@ function ownVisibilityInfo(el: Element, memo: Map<Element, VisibilityInfo>): Vis
   return info;
 }
 
-function overflowAxes(style: CSSStyleDeclaration | null): [string, string] {
-  const shorthand = style?.overflow ?? '';
-  const [x = 'visible', y = x] = ('' === shorthand ? 'visible' : shorthand).split(/\s+/);
-  return [
-    null === style || '' === style.overflowX ? x : style.overflowX,
-    null === style || '' === style.overflowY ? y : style.overflowY,
-  ];
-}
-
 function positionedContainingBlock(
   el: Element,
   fixed: boolean,
@@ -722,8 +757,12 @@ function positionedContainingBlock(
     parent = ownVisibilityInfo(parent, memo).parent
   ) {
     const style = ownVisibilityInfo(parent, memo).style;
-    if (null === style || 'contents' === style.display) continue;
-    if (!fixed && '' !== style.position && 'static' !== style.position) return parent;
+    if (null === style || 'contents' === style.display) {
+      continue;
+    }
+    if (!fixed && '' !== style.position && 'static' !== style.position) {
+      return parent;
+    }
     // Transforms/containment do not apply to ordinary inline boxes. Filters still establish
     // containing blocks there; individual identity transforms do on transformable boxes.
     const transformable =
@@ -751,98 +790,11 @@ function positionedContainingBlock(
         !NON_CLIPPING_DISPLAY.has(style.display) &&
         (style.contain.split(/\s+/).some((value) => CONTAINING_BLOCK_CONTAIN.has(value)) ||
           'auto' === style.contentVisibility))
-    )
+    ) {
       return parent;
+    }
   }
   return null;
-}
-
-function clippingBox(el: Element, info: VisibilityInfo): VisibleBounds {
-  if (info.clipBox !== undefined) return info.clipBox;
-  const rect = el.getBoundingClientRect();
-  const style = info.style;
-  const px = (value: string | undefined): number => Number.parseFloat(value ?? '') || 0;
-  const border = (value: string | undefined, kind: string | undefined): number =>
-    kind === undefined || '' === kind || 'none' === kind || 'hidden' === kind ? 0 : px(value);
-  const scaleX = isHtmlElement(el) && el.offsetWidth > 0 ? rect.width / el.offsetWidth : 1;
-  const scaleY = isHtmlElement(el) && el.offsetHeight > 0 ? rect.height / el.offsetHeight : 1;
-  const left =
-    isHtmlElement(el) && el.offsetWidth > 0
-      ? rect.left + el.clientLeft * scaleX
-      : rect.left + border(style?.borderLeftWidth, style?.borderLeftStyle);
-  const top =
-    isHtmlElement(el) && el.offsetHeight > 0
-      ? rect.top + el.clientTop * scaleY
-      : rect.top + border(style?.borderTopWidth, style?.borderTopStyle);
-  const right =
-    isHtmlElement(el) && el.offsetWidth > 0
-      ? left + el.clientWidth * scaleX
-      : rect.right - border(style?.borderRightWidth, style?.borderRightStyle);
-  const bottom =
-    isHtmlElement(el) && el.offsetHeight > 0
-      ? top + el.clientHeight * scaleY
-      : rect.bottom - border(style?.borderBottomWidth, style?.borderBottomStyle);
-  const margin = (style?.overflowClipMargin ?? '').split(/\s+/);
-  const outset = px(margin.at(-1));
-  const borderBox = margin.includes('border-box');
-  const contentBox = margin.includes('content-box');
-  const [x, y] = overflowAxes(style);
-  const clipLeft =
-    'clip' === x
-      ? (borderBox ? rect.left : left + (contentBox ? px(style?.paddingLeft) * scaleX : 0)) -
-        outset * scaleX
-      : left;
-  const clipRight =
-    'clip' === x
-      ? (borderBox ? rect.right : right - (contentBox ? px(style?.paddingRight) * scaleX : 0)) +
-        outset * scaleX
-      : right;
-  const clipTop =
-    'clip' === y
-      ? (borderBox ? rect.top : top + (contentBox ? px(style?.paddingTop) * scaleY : 0)) -
-        outset * scaleY
-      : top;
-  const clipBottom =
-    'clip' === y
-      ? (borderBox ? rect.bottom : bottom - (contentBox ? px(style?.paddingBottom) * scaleY : 0)) +
-        outset * scaleY
-      : bottom;
-  info.clipBox = {
-    left: clipLeft,
-    right: clipRight,
-    top: clipTop,
-    bottom: clipBottom,
-    width: clipRight - clipLeft,
-    height: clipBottom - clipTop,
-  };
-  return info.clipBox;
-}
-
-/** A box outside a scrollport, moved to its near edge on each scrolling axis, as scrolling would. */
-function scrolledInto(
-  b: VisibleBounds,
-  port: VisibleBounds,
-  alongX: boolean,
-  alongY: boolean,
-): VisibleBounds {
-  const axis = (
-    lo: number,
-    hi: number,
-    size: number,
-    from: number,
-    to: number,
-  ): [number, number] => {
-    if (hi > from && lo < to) return [lo, hi];
-    const span = Math.min(size, to - from);
-    return lo >= to ? [to - span, to] : [from, from + span];
-  };
-  const [left, right] = alongX
-    ? axis(b.left, b.right, b.width, port.left, port.right)
-    : [b.left, b.right];
-  const [top, bottom] = alongY
-    ? axis(b.top, b.bottom, b.height, port.top, port.bottom)
-    : [b.top, b.bottom];
-  return { left, right, top, bottom, width: right - left, height: bottom - top };
 }
 
 /** Undefined means no box was needed; null means hidden. Only real clipping reads layout. */
@@ -858,10 +810,14 @@ function visibleBounds(
 ): VisibleBounds | null | undefined {
   let bounds = initial;
   const target = ownVisibilityInfo(el, memo);
-  if (target.hidden) return null;
+  if (target.hidden) {
+    return null;
+  }
   // CSS hiding composes, geometry does not. An unclipped ancestor chain needs no layout reads
   // or repeated walk; a clipped parent can still have a descendant overflowing back into view.
-  if (null === target.parent || !ownVisibilityInfo(target.parent, memo).hasClipping) return bounds;
+  if (null === target.parent || !ownVisibilityInfo(target.parent, memo).hasClipping) {
+    return bounds;
+  }
   let clipFrom: Element | null | undefined;
   for (
     let current: Element | null = el;
@@ -869,8 +825,12 @@ function visibleBounds(
     current = ownVisibilityInfo(current, memo).parent
   ) {
     const info = ownVisibilityInfo(current, memo);
-    if (info.hidden) return null;
-    if (current === clipFrom) clipFrom = undefined;
+    if (info.hidden) {
+      return null;
+    }
+    if (current === clipFrom) {
+      clipFrom = undefined;
+    }
     const style = info.style;
     // An app shell (`overflow: hidden`, full height) around a scrolling main read every row below
     // the fold as hidden: the row sat outside the shell's box though one scroll brings it in.
@@ -895,7 +855,9 @@ function visibleBounds(
         const right = info.clipX ? Math.min(bounds.right, clip.right) : bounds.right;
         const top = info.clipY ? Math.max(bounds.top, clip.top) : bounds.top;
         const bottom = info.clipY ? Math.min(bounds.bottom, clip.bottom) : bounds.bottom;
-        if (right <= left || bottom <= top) return null;
+        if (right <= left || bottom <= top) {
+          return null;
+        }
         bounds = { left, right, top, bottom, width: right - left, height: bottom - top };
       }
     }
@@ -915,12 +877,20 @@ function visibleBounds(
  * the region that can intersect the viewport. The check stays synchronous inside the predicate pass.
  */
 export function isInViewport(el: Element, memo?: Map<Element, boolean>): boolean {
-  if (!isVisible(el, memo)) return false;
+  if (!isVisible(el, memo)) {
+    return false;
+  }
   const view = el.ownerDocument.defaultView;
-  if (null === view) return false;
+  if (null === view) {
+    return false;
+  }
   const r = visibleBounds(el, visibilityInfoMemo(memo), el.getBoundingClientRect());
-  if (null === r || undefined === r) return false;
-  if (r.width <= 0 || r.height <= 0) return false;
+  if (null === r || undefined === r) {
+    return false;
+  }
+  if (r.width <= 0 || r.height <= 0) {
+    return false;
+  }
   return r.bottom > 0 && r.right > 0 && r.top < view.innerHeight && r.left < view.innerWidth;
 }
 
@@ -932,7 +902,9 @@ export function isInViewport(el: Element, memo?: Map<Element, boolean>): boolean
  */
 function collapsed(el: Element, memo: Map<Element, VisibilityInfo>): boolean {
   const own = ownVisibilityInfo(el, memo);
-  if (!own.clipX && !own.clipY) return false;
+  if (!own.clipX && !own.clipY) {
+    return false;
+  }
   const rects = Array.from(el.getClientRects());
   return (
     rects.length > 0 &&
@@ -942,12 +914,18 @@ function collapsed(el: Element, memo: Map<Element, VisibilityInfo>): boolean {
 
 /** Visibility combines inherited CSS/ARIA hiding with this target's surviving clipping region. */
 export function isVisible(el: Element, memo?: Map<Element, boolean>): boolean {
-  if (!el.isConnected) return false;
+  if (!el.isConnected) {
+    return false;
+  }
   const cached = memo?.get(el);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    return cached;
+  }
   const info = visibilityInfoMemo(memo);
   const result = visibleBounds(el, info, undefined, true) !== null && !collapsed(el, info);
-  if (memo !== undefined) memo.set(el, result);
+  if (memo !== undefined) {
+    memo.set(el, result);
+  }
   return result;
 }
 
@@ -972,20 +950,28 @@ export function describe(el: Element, memo?: Map<Element, boolean>): ElementDesc
     states: getStates(el, visible),
     visible,
   };
-  if (value !== undefined && value.length > 0) base.value = value;
-  if (text.length > 0 && text !== name) base.text = text;
+  if (value !== undefined && value.length > 0) {
+    base.value = value;
+  }
+  if (text.length > 0 && text !== name) {
+    base.text = text;
+  }
   // DOM-only lookup on purpose: describe() runs once per matched element, so the adapter's fiber walk
   // would turn a broad query into thousands of tree traversals. The stamped attribute answers the
   // same question for a fraction of the cost, and single-element paths that can afford the better
   // answer (inspect, act, review) use sourceFor() instead.
   const source = formatSource(sourceFromDom(el));
-  if (source !== undefined) base.source = source;
+  if (source !== undefined) {
+    base.source = source;
+  }
   // Chart faults, only when there are any. Gated on the element actually containing plot geometry so
   // the common case — every non-chart element on the page — pays one querySelector miss and nothing
   // else, and a HEALTHY chart adds no bytes to the wire either.
   if (el.querySelector('path, polyline, polygon') !== null) {
     const faults = inspectChart(el).findings;
-    if (faults.length > 0) base.chart = faults;
+    if (faults.length > 0) {
+      base.chart = faults;
+    }
   }
   return base;
 }

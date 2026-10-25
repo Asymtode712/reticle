@@ -142,6 +142,22 @@ describe('a key that belongs to another action of the same tool', () => {
     expect(said).toContain('`names` is a parameter of action "flows"');
   });
 
+  /*
+   * An agent sent `session { action: "yield", claim, summary }`. The refusal named "end" but not what
+   * to do, and "end" ends the session for good, which a yield does not.
+   */
+  it('says how to go on: call the action that takes the keys, or call again without them', async () => {
+    const said = await refusal(
+      tool(TOOLS, ReticleTool.SESSION).handler(deps, {
+        action: 'yield',
+        claim: 'pass',
+        summary: 'done',
+      }),
+    );
+    expect(said).toContain('Call reticle_session { action: "end" } to use them');
+    expect(said).toContain('or call action "yield" again without them');
+  });
+
   it('is refused on look { action: "page" }', async () => {
     const said = await refusal(
       tool(MERGED_TOOLS, ReticleTool.LOOK).handler(deps, { action: 'page', limit: 8 }),

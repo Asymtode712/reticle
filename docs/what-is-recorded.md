@@ -5,19 +5,20 @@ description: What Reticle keeps on your machine, what is redacted, and what it t
 
 Reticle drives your app and reads what it did. That means it holds real content from real pages, so this page says exactly what it keeps, where it keeps it, and what it takes to make any of it leave.
 
-If you read one line: **a verdict is entirely local and needs no account.** Nothing from your app leaves the machine until you link a project (`reticle connect`, or `RETICLE_API_KEY` in CI). After that, what syncs is set by `reticle config`, and when the Harness drives, the platform sees the steps it drives. A linked project also sends each prompt you typed with the runs that verify it, unless `"shareRequests": false`; see [Prompt capture](prompt-capture.md). Secret values never leave. (Anonymous usage counts, which carry nothing from your app, are separate and described in [Telemetry](telemetry.md).)
+If you read one line: **a verdict is entirely local and needs no account.** Nothing from your app leaves the machine until you link a project (`reticle connect`, or `RETICLE_API_KEY` in CI). After that, what syncs is set by `reticle config`, and when the Harness drives, the platform sees the steps it drives. A linked project also sends each prompt you typed, and the message the agent closed its turn with, with the runs that verify it, unless `"shareRequests": false`; see [Prompt capture](prompt-capture.md). Secret values never leave. (Usage counts, which carry nothing from your app, are separate and described in [Telemetry](telemetry.md).)
 
 ## On your machine
 
-Everything lands in `.reticle/` in your project, and it is yours. Three kinds of thing:
+In a wired project, everything lands in `.reticle/` in your project, and it is yours. Reticle writes nothing into a project that you did not wire. A run that matches no project goes to `~/.reticle/unmatched/`. Four kinds of thing:
 
 |  | what it is | what is in it |
 | --- | --- | --- |
 | **runs** | a verdict and its evidence | what was claimed, whether it held, the request or state change that decided it, and the `file:line` of the element driven |
 | **flows** | a journey you drove, saved so it can be replayed | the steps, the anchors they resolve by, and the values that were typed |
 | **memory** | what this project has learned across sessions | intents you declared, envelopes of normal behaviour, notes about anchors that drift, the coverage ledger (`coverage.json`), the notes people pinned in the HUD (`notes.json`), the newest prompt (`request.json`) and every prompt (`requests.jsonl`, rotated to `requests.1.jsonl`) that the prompt hook captured or the agent relayed, redacted |
+| **episodes** | every tool call behind the work, in `episodes/` | each call to Reticle's tools with its arguments (typed values removed), its whole result and the page events it caused; and, from the agent hooks, the agent's own shell commands, edits and web calls, its model and its closing messages, redacted ([Prompt capture](prompt-capture.md)) |
 
-`.reticle/` splits into a part meant for git and a part meant to stay local. Flows are the part worth committing: a saved flow is a regression test. Evidence is the part that is not.
+`.reticle/` splits into a part meant for git and a part meant to stay local. Flows are the part worth committing: a saved flow is a regression test. Evidence, the episodes with it, is the part that is not.
 
 ## What is redacted, and what is not
 
@@ -43,6 +44,8 @@ npx @reticlehq/server config --runs on|off --flows on|off --memory on|off
 
 `--memory` covers the coverage ledger and the HUD notes as well, and the notes are the words people typed. **Prompts are shared by default from a linked project.** `reticle init` installs a hook that keeps each prompt you send, redacted, in `.reticle/` ([Prompt capture](prompt-capture.md)). A run written soon after a prompt carries it to the platform, so the dashboard can show what each run was for, and the Harness sends the newest one to the platform planner as a goal. A key in the environment (`RETICLE_API_KEY`) counts as linked. `"shareRequests": false` in `.reticle.json` keeps every request on the machine. An unlinked project sends it nowhere. The prompt files are in `.reticle/.gitignore` either way.
 
+A run also carries the agent's model and, under the same `shareRequests` rule as the prompt, the message the agent closed its turn with. Nothing else from `episodes/` leaves: the files stay on the machine. `"promptCapture": false` in `.reticle.json`, or `RETICLE_PROMPT_CAPTURE=0`, stops all that the agent hooks keep: the prompts, the tool calls, the model and the closing messages. `RETICLE_JOURNAL=0`, or `"journal": false` in `.reticle.json`, stops the episode log.
+
 The Harness runs on the platform, so the platform sees what it drives: each step's result goes there so it can choose the next one. A secret field is sent by name only; its value is typed in on your machine.
 
 **Your apps, for the platform.** While a project is linked, the daemon tells the platform every ten seconds, with or without an app open, which apps on this machine have Reticle connected, so the dashboard can show which apps are live. For each app it sends: a key made from a hash of this machine and the project's folder (the folder path itself never leaves), the project's name (its package name, else its folder's name), the address the app is open at with Reticle's own query parameters removed, the page title, what it is built with (`react`, `vite`, `electron`, …), this machine's name, the Reticle version, and what this daemon can do for the platform. The platform keeps the last report for each app until the project is deleted. Its answer can ask this machine to open one of those apps again, or show you a short notice (for example, to update Reticle), which appears in the daemon's log and on the HUD.
@@ -51,7 +54,7 @@ The Harness runs on the platform, so the platform sees what it drives: each step
 
 ## Telemetry, which is separate from all of the above
 
-The CLI sends anonymous usage events: event names and a random installation id. No code, no page content, no URLs from your app. It is how we know which parts of the product are reached at all.
+The CLI sends usage events: event names, a random installation id, and a hash of the project's git origin. A linked project adds its workspace id, and a licensed build adds its licence id, so those events can be connected to an organization. No code, no page content, no URLs from your app. No IP address and no location: each event tells the analytics service not to store the address or look up a location from it. It is how we know which parts of the product are reached at all.
 
 ```bash
 RETICLE_TELEMETRY=0          # this shell
@@ -59,7 +62,7 @@ DO_NOT_TRACK=1               # the convention, honoured
 npx @reticlehq/server telemetry disable   # this machine, permanently
 ```
 
-Telemetry carries no free text. Free text leaves in three ways: a feedback report (never collected passively; `RETICLE_FEEDBACK=0` disables it), HUD notes on a linked project with `--memory on`, and your prompts from a linked project. Prompts are on by default once a project is linked; `"shareRequests": false` stops them.
+Telemetry carries no free text. Free text leaves in three ways: a feedback report (never collected passively; `RETICLE_FEEDBACK=0` disables it; a reply address is sent only when you give it with `--contact`), HUD notes on a linked project with `--memory on`, and your prompts and the agent's closing messages from a linked project. Prompts and closing messages are on by default once a project is linked; `"shareRequests": false` stops them.
 
 The daemon also fetches a small public file, `https://reticle.sh/hud/notices.v1.json`, for the notices in the HUD's rail. The request carries nothing about you or your project. `RETICLE_TELEMETRY=0` or `DO_NOT_TRACK=1` stops it, and `RETICLE_HUD_NOTICES_URL` points it elsewhere.
 

@@ -118,7 +118,9 @@ export function driveFlowStatus(checks: {
   failed: number;
   goalMet?: boolean | undefined;
 }): RunFlowStatus {
-  if (0 < checks.failed) return RunFlowStatus.FAIL;
+  if (0 < checks.failed) {
+    return RunFlowStatus.FAIL;
+  }
   return 0 < checks.held && false !== checks.goalMet ? RunFlowStatus.PASS : RunFlowStatus.SKIPPED;
 }
 
@@ -569,6 +571,20 @@ export const ReticleVerificationRunSchema = z.object({
     kind: z.nativeEnum(RunAgentKind),
     model: z.string().optional(),
   }),
+
+  /**
+   * The episode that produced this run: `.reticle/episodes/<episodeId>.jsonl` on the machine that
+   * ran it. Joins the run to every tool call the agent made, exactly. Absent when no episode was
+   * written (the journal off, a CI run with no agent).
+   */
+  episodeId: z.string().optional(),
+
+  /**
+   * The coding agent's own session id, as its MCP server announced it (Claude Code's
+   * `CLAUDE_CODE_SESSION_ID`, the `session_id` its hooks receive). Joins the run to the agent
+   * hooks' `agent-<session>.jsonl` exactly, even with two sessions of one agent in a project.
+   */
+  agentSession: z.string().optional(),
 
   trigger: z.object({
     kind: z.nativeEnum(RunTrigger),

@@ -1,5 +1,5 @@
 import * as http from 'node:http';
-import { authFailureReason } from './auth-failure-reason.js';
+import { authFailureReason, originRejectedReason } from './auth-failure-reason.js';
 import { impactSnapshot, recordImpact } from '@/memory/impact/impact-recorder.js';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
@@ -7,7 +7,6 @@ import { HookEvent } from '@reticlehq/core/hooks';
 import { emitSessionHook } from '@/hooks/hook-emit.js';
 import {
   EventType,
-  HumanControlKind,
   RETICLE_WS_PATH,
   ReticleMessageSchema,
   LOOPBACK_HOST,
@@ -18,7 +17,6 @@ import {
   isLocalPage,
   isLoopbackHostname,
   isOpaqueOrigin,
-  OPAQUE_ORIGIN,
   isHighValueEvent,
   RATE_CAP_HIGH_VALUE_RESERVE_RATIO,
   type HelloMessage,
@@ -28,11 +26,19 @@ import {
 import { Session } from '@/portal/session/session.js';
 import { SessionManager } from '@/portal/session/session-manager.js';
 import { SessionNonces } from './session-nonces.js';
+import { FollowRefusal, OriginFollower, normalizeOrigin } from './origin/origin-follow.js';
+import type { FollowNavigation } from './origin/origin-follow.js';
 import { admitHello } from '@/portal/production/production-hello.js';
 import { forgetRecordedGaps } from '@/portal/session/recorded-gaps.js';
 import { tokensMatch } from './token-auth.js';
 import { noteWrongPathUpgrades, wrongPathReason } from './wrong-path.js';
-import { harnessRequest, type HarnessRequest } from './harness-request.js';
+import {
+  harnessRequest,
+  isSigninRequest,
+  isSyncRequest,
+  replayRequest,
+  type HarnessRequest,
+} from './harness-request.js';
 import { pairingTokenSource } from './pairing-token.js';
 import { log } from '@/log.js';
 import { getSessionMetrics } from '@/telemetry/session-metrics.js';
@@ -48,7 +54,12 @@ import {
   SkewPair,
 } from '@/command/version/version-skew.js';
 import { noteVersionSkew } from '@/command/version/version-nudge.js';
-import { helloProtocolMismatch, peekHelloPage, protocolSkewReason } from './protocol-skew.js';
+import {
+  helloProtocolMismatch,
+  peekFrameKind,
+  peekHelloPage,
+  protocolSkewReason,
+} from './protocol-skew.js';
 import { SERVER_VERSION } from '@/command/version/identity/server-version.js';
 
 /**
@@ -140,28 +151,6 @@ export const WS_CLOSE_REASON = {
     'invalid hello: version skew. Put SDK, build plugin and server on one release.',
 } as const;
 
-/**
- * A dial turned away at the ORIGIN gate, in words the reader can act on.
- *
- * This is the refusal that used to leave no trace anywhere. It happens before any HELLO, so it
- * produced no `noteClosure`, no `session_disconnected`, nothing but an `origin_rejected` log line —
- * and the daemon log is the file nobody opens until they have already lost the afternoon. Reported
- * from a multi-tenant app resolving its tenant from the `Host` header: on a hosts-file alias every
- * dial was refused here, `doctor` reported every check green, and the lease hint blamed the port.
- *
- * The origin is IN the message because it is the fix: it is either the alias to allow-list, or the
- * proof that the page is not being served from where the developer thinks it is.
- */
-function originRejectedReason(origin: string | undefined): string {
-  const named = origin === undefined || 0 === origin.length ? 'a page sending no Origin' : origin;
-  return (
-    `a browser dialled this daemon and was REFUSED at the origin gate: ${named} is not allowed. ` +
-    'Off localhost the SDK needs BOTH `allowNonLocalhost: true` AND a pairing token, and the ' +
-    'daemon needs that origin allow-listed (RETICLE_ALLOWED_ORIGINS). The app is running and ' +
-    'instrumented — it was turned away, so do not go looking for a stopped dev server.'
-  );
-}
-
 /** WS close codes + reasons the bridge sends to the SDK (1008 = policy violation, 1013 = try again later). */
 const WS_CLOSE = {
   TOO_MANY_HANDSHAKES: [1013, 'too many pending handshakes'],
@@ -180,27 +169,11 @@ const WS_CLOSE = {
 
 /** Parse a positive integer env override; anything else (unset, zero, junk) falls through to the default. */
 function positiveIntFromEnv(raw: string | undefined): number | undefined {
-  if (raw === undefined) return undefined;
+  if (raw === undefined) {
+    return undefined;
+  }
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-}
-
-/** The flow name if this event is a panel ▶ replay request, else undefined. Pure boundary narrowing. */
-function replayRequest(event: { type: string; data: Record<string, unknown> }): string | undefined {
-  if (event.type !== EventType.HUMAN_CONTROL) return undefined;
-  if (event.data['kind'] !== HumanControlKind.REPLAY) return undefined;
-  const name = event.data['text'];
-  return 'string' === typeof name && name.length > 0 ? name : undefined;
-}
-
-/** True when this event is the panel's Sign in. Pure boundary narrowing, like the above. */
-function isSigninRequest(event: { type: string; data: Record<string, unknown> }): boolean {
-  return event.type === EventType.HUMAN_CONTROL && event.data['kind'] === HumanControlKind.SIGNIN;
-}
-
-/** True when this event is the panel's "sync now" button. Pure boundary narrowing, like the above. */
-function isSyncRequest(event: { type: string; data: Record<string, unknown> }): boolean {
-  return event.type === EventType.HUMAN_CONTROL && event.data['kind'] === HumanControlKind.SYNC;
 }
 
 interface BridgeOptions {
@@ -227,30 +200,21 @@ interface BridgeOptions {
    * it get the no-project fallback.
    */
   sdkFix?: (projectId?: string) => string;
-}
-
-/**
- * Canonical comparable form of a WS `Origin`. Web origins collapse to scheme://host[:port]. An
- * OPAQUE origin — a desktop webview (`tauri://localhost`, `app://.`) or `file://`, whose `URL.origin`
- * is the string "null" — is kept VERBATIM instead, so it survives into the allow-list and can be
- * compared. Collapsing those to "null" would both merge every desktop scheme into one bucket and
- * feed an unparseable string to `new URL`. Returns null only for a header that is not an origin.
- */
-function normalizeOrigin(origin: string): string | null {
-  if (origin === OPAQUE_ORIGIN) return OPAQUE_ORIGIN;
-  try {
-    const web = new URL(origin).origin;
-    return web === OPAQUE_ORIGIN ? origin : web;
-  } catch {
-    return null;
-  }
+  /** Lets a session follow its own navigation to an origin not allow-listed. See origin-follow.ts. */
+  followNavigation?: FollowNavigation;
 }
 
 /** Normalize ws RawData (string | Buffer | Buffer[] | ArrayBuffer) into a UTF-8 string. */
 function rawToString(raw: RawData): string {
-  if ('string' === typeof raw) return raw;
-  if (Array.isArray(raw)) return Buffer.concat(raw).toString('utf8');
-  if (raw instanceof ArrayBuffer) return Buffer.from(raw).toString('utf8');
+  if ('string' === typeof raw) {
+    return raw;
+  }
+  if (Array.isArray(raw)) {
+    return Buffer.concat(raw).toString('utf8');
+  }
+  if (raw instanceof ArrayBuffer) {
+    return Buffer.from(raw).toString('utf8');
+  }
   return raw.toString('utf8');
 }
 
@@ -284,6 +248,7 @@ export class Bridge {
   readonly #maxPendingConnections: number;
   readonly #helloTimeoutMs: number;
   readonly #sdkFix: (projectId?: string) => string;
+  readonly #follower: OriginFollower | undefined;
   #pendingConnections = 0;
   #onReplay: ReplayRequestHandler | undefined;
   /**
@@ -378,6 +343,10 @@ export class Bridge {
       options.maxPendingConnections ?? TRANSPORT_LIMITS.MAX_PENDING_CONNECTIONS;
     this.#helloTimeoutMs = options.helloTimeoutMs ?? TRANSPORT_LIMITS.HELLO_TIMEOUT_MS;
     this.#sdkFix = options.sdkFix ?? (() => sdkFix(SERVER_VERSION));
+    this.#follower =
+      options.followNavigation === undefined
+        ? undefined
+        : new OriginFollower(options.followNavigation);
 
     if (options.server !== undefined) {
       const srv = options.server;
@@ -386,8 +355,10 @@ export class Bridge {
         path: RETICLE_WS_PATH,
         maxPayload: TRANSPORT_LIMITS.MAX_MESSAGE_BYTES,
         verifyClient: ({ origin }, done) => {
-          const allowed = this.#originAllowed(origin);
-          if (!allowed) this.#noteOriginRejected(origin);
+          const allowed = this.#originAllowed(origin) || this.#mayFollow(origin);
+          if (!allowed) {
+            this.#noteOriginRejected(origin);
+          }
           done(allowed, 403, 'Forbidden');
         },
       });
@@ -414,8 +385,10 @@ export class Bridge {
         path: RETICLE_WS_PATH,
         maxPayload: TRANSPORT_LIMITS.MAX_MESSAGE_BYTES,
         verifyClient: ({ origin }, done) => {
-          const allowed = this.#originAllowed(origin);
-          if (!allowed) this.#noteOriginRejected(origin);
+          const allowed = this.#originAllowed(origin) || this.#mayFollow(origin);
+          if (!allowed) {
+            this.#noteOriginRejected(origin);
+          }
           done(allowed, 403, 'Forbidden');
         },
       });
@@ -451,12 +424,15 @@ export class Bridge {
       }
     });
 
-    this.#wss.on('connection', (socket) => {
-      this.#onConnection(socket);
+    this.#wss.on('connection', (socket, request) => {
+      this.#onConnection(socket, request.headers.origin);
     });
   }
 
-  #onConnection(socket: WebSocket): void {
+  #onConnection(socket: WebSocket, origin?: string): void {
+    // The socket's origin, and whether it is in only on the follow path (decided at its HELLO).
+    const dialled = origin === undefined ? null : normalizeOrigin(origin);
+    const following = dialled !== null && !this.#originAllowed(origin) ? dialled : undefined;
     if (this.#pendingConnections >= this.#maxPendingConnections) {
       // On the channel the no-session diagnosis reads, not only into the log. This refusal happens
       // before any HELLO, so without it the dial leaves no trace at all — the same hole the origin
@@ -476,12 +452,16 @@ export class Bridge {
       this.#maxMessagesPerSecond * RATE_CAP_HIGH_VALUE_RESERVE_RATIO,
     );
     const releasePending = (): void => {
-      if (!awaitingHello) return;
+      if (!awaitingHello) {
+        return;
+      }
       awaitingHello = false;
       this.#pendingConnections -= 1;
     };
     const helloTimer = setTimeout(() => {
-      if (!awaitingHello) return;
+      if (!awaitingHello) {
+        return;
+      }
       releasePending();
       socket.close(...WS_CLOSE.HELLO_TIMEOUT);
     }, this.#helloTimeoutMs);
@@ -578,7 +558,9 @@ export class Bridge {
             highValueInWindow += 1;
           } else {
             droppedByRate += 1;
-            if (session !== undefined) session.noteRateLimited(droppedByRate);
+            if (session !== undefined) {
+              session.noteRateLimited(droppedByRate);
+            }
             return;
           }
         }
@@ -629,6 +611,19 @@ export class Bridge {
             socket.close(WS_CLOSE.AUTH_FAILED[0], reason);
             return;
           }
+          let notFollowed: string | undefined;
+          if (following !== undefined) {
+            notFollowed =
+              this.#follower === undefined
+                ? FollowRefusal.POLICY_REFUSED
+                : this.#follower.refusal(parsed, following);
+          }
+          if (notFollowed !== undefined) {
+            log('origin_follow_refused', { sessionId: parsed.sessionId, origin: following });
+            this.sessions.noteClosure(notFollowed, this.#clock());
+            socket.close(1008, notFollowed);
+            return;
+          }
           // The nonce decides whether this is a production session, never the page's own claim.
           const admission = admitHello(parsed, grant?.production);
           if (!admission.ok) {
@@ -651,11 +646,15 @@ export class Bridge {
           session = new Session(parsed, socket, this.#clock);
           session.production = admission.production;
           const drive = admission.production;
-          if (drive !== undefined) session.onEvent((event) => drive.noteEvent(event));
+          if (drive !== undefined) {
+            session.onEvent((event) => drive.noteEvent(event));
+          }
           // A reload keeps the session id. Its gaps describe the old page, not this one (#1655).
           forgetRecordedGaps(session.id);
           // Recorded on ACCEPTANCE, so it is evidence of what this daemon really serves.
-          if (parsed.projectId !== undefined) this.#servedProjects.add(parsed.projectId);
+          if (parsed.projectId !== undefined) {
+            this.#servedProjects.add(parsed.projectId);
+          }
           // Attach the durable journal (and anything else registered) before any events stream in.
           // One throwing handler must not stop the others, or the order of registration would decide
           // which features survive a bad frame.
@@ -677,6 +676,10 @@ export class Bridge {
           const attached = session;
           attached.pushImpact(() => impactSnapshot(attached.artifactRoot), true);
           const replaced = this.sessions.add(session);
+          this.#follower?.remember(session.id, dialled);
+          if (following !== undefined) {
+            log('origin_followed', { sessionId: session.id, to: following });
+          }
           // Said out loud once the session is actually in the registry, never before: a hook that
           // fires on a session a consumer cannot then look up describes a moment that did not happen.
           emitSessionHook(HookEvent.SESSION_STARTED, {
@@ -760,7 +763,7 @@ export class Bridge {
           // The one fact that separates a broken install from an unused one. Best-effort and wrapped:
           // a metric must never affect whether an app can connect. See SessionSummary.appConnects.
           try {
-            getSessionMetrics().recordAppConnected();
+            getSessionMetrics().recordAppConnected(parsed.sdkVersion);
           } catch {
             /* never let a counter interfere with an app connecting */
           }
@@ -774,7 +777,9 @@ export class Bridge {
           }
           return;
         }
-        if (session === undefined) return;
+        if (session === undefined) {
+          return;
+        }
         session.touch();
 
         if (parsed.kind === MessageKind.EVENT) {
@@ -785,18 +790,28 @@ export class Bridge {
           // test that decides whether this is a panel control at all, and calling it twice would
           // invite the two calls to disagree.
           const harness = harnessRequest(parsed.event);
-          if (replay !== undefined) this.#onReplay?.(session.id, replay);
+          if (replay !== undefined) {
+            this.#onReplay?.(session.id, replay);
+          }
           // Same shape as ▶ replay, and routed the same way: what to push lives in the daemon's
           // cloud wiring, which a Session cannot reach. Nothing is awaited — the panel is telling
           // us to hurry, not asking for a result.
-          else if (isSyncRequest(parsed.event)) this.#onSyncRequest?.();
+          else if (isSyncRequest(parsed.event)) {
+            this.#onSyncRequest?.();
+          }
           // The switch is written through to the platform by the daemon, for the same reason: the
           // Session has no cloud credential and should not grow one.
-          else if (harness !== undefined) this.#onHarnessRequest?.(harness, session);
+          else if (harness !== undefined) {
+            this.#onHarnessRequest?.(harness, session);
+          }
           // Signing in writes `~/.reticle`, which only the daemon may do; the panel only asks.
-          else if (isSigninRequest(parsed.event)) this.#onSigninRequest?.(session);
+          else if (isSigninRequest(parsed.event)) {
+            this.#onSigninRequest?.(session);
+          }
           // Pass the raw frame's byte length so the buffer doesn't re-serialize every event for accounting.
-          else session.pushEvent(parsed.event, Buffer.byteLength(text, 'utf8'));
+          else {
+            session.pushEvent(parsed.event, Buffer.byteLength(text, 'utf8'));
+          }
         } else if (parsed.kind === MessageKind.COMMAND_RESULT) {
           session.handleResult(parsed);
         }
@@ -853,18 +868,31 @@ export class Bridge {
     this.sessions.noteClosure(originRejectedReason(origin), this.#clock());
   }
 
+  /** Admit the handshake so the HELLO can be judged. Only with a host policy and a web origin. */
+  #mayFollow(origin: string | undefined): boolean {
+    return this.#follower?.mayDial(origin === undefined ? null : normalizeOrigin(origin)) ?? false;
+  }
+
   #originAllowed(origin: string | undefined): boolean {
     // A real browser SDK connection always carries an Origin. A missing Origin means a non-browser
     // local process (another app, a malicious npm postinstall, an extension's native host) — untrusted
     // unless a pairing token is required, in which case the HELLO token check is the real gate.
-    if (origin === undefined) return this.#token !== undefined;
+    if (origin === undefined) {
+      return this.#token !== undefined;
+    }
     const normalized = normalizeOrigin(origin);
-    if (null === normalized) return false;
-    if (this.#allowedOrigins.has(normalized) || this.nonces.admitsOrigin(normalized)) return true;
+    if (null === normalized) {
+      return false;
+    }
+    if (this.#allowedOrigins.has(normalized) || this.nonces.admitsOrigin(normalized)) {
+      return true;
+    }
     // A desktop webview (Electron, Tauri) or a file:// document sends an opaque Origin: no host to
     // check, so it is exactly as attributable as a missing Origin — defer to the token, as above.
     // Without this branch `new URL` throws INSIDE the WS upgrade handler, crashing the process.
-    if (isOpaqueOrigin(normalized)) return this.#token !== undefined;
+    if (isOpaqueOrigin(normalized)) {
+      return this.#token !== undefined;
+    }
     // `isLocalPage`, not `isLoopbackHostname` — the SAME rule the SDK applies on the page side.
     //
     // They had drifted, and the drift made a whole platform unreachable. Tauri v2 uses an opaque
@@ -959,33 +987,12 @@ export class Bridge {
 
   close(): Promise<void> {
     return new Promise((resolve) => {
-      for (const client of this.#wss.clients) client.terminate();
+      for (const client of this.#wss.clients) {
+        client.terminate();
+      }
       this.#wss.close(() => {
         resolve();
       });
     });
   }
 }
-
-/**
- * The `kind` and event `type` of a frame that failed the schema, for the log: never its payload,
- * which can carry anything the page sent. Each is a bounded string or absent.
- */
-function peekFrameKind(text: string): { kind?: string; eventType?: string } {
-  const short = (v: unknown): string | undefined =>
-    'string' === typeof v ? v.slice(0, MAX_LOGGED_FRAME_FIELD) : undefined;
-  try {
-    const json = JSON.parse(text) as { kind?: unknown; event?: { type?: unknown } } | null;
-    const kind = short(json?.kind);
-    const eventType = short(json?.event?.type);
-    return {
-      ...(kind === undefined ? {} : { kind }),
-      ...(eventType === undefined ? {} : { eventType }),
-    };
-  } catch {
-    return {};
-  }
-}
-
-/** How much of a frame's `kind` or event `type` the drop log keeps. */
-const MAX_LOGGED_FRAME_FIELD = 64;

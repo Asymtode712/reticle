@@ -1,0 +1,3 @@
+### Fixed
+
+- **`@reticlehq/server` — Codex asked for approval on every Reticle call, and refused each one under `approval_policy = "never"`.** A headless `codex exec` then made no Reticle call at all. Each Reticle tool now declares MCP annotations: `readOnlyHint` (true for the tools that only read, such as `reticle_look` and `reticle_observe`), `destructiveHint: false` and `openWorldHint`. `init` and `reticle mcp` now also add `default_tools_approval_mode = "approve"` under `[mcp_servers.reticle]` in `~/.codex/config.toml`, the same pre-approval that they write for Claude Code. They add only that one line and keep a mode that you set. When the `[mcp_servers.reticle]` table is not there, they write nothing and tell you the line to add.

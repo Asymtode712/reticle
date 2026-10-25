@@ -68,17 +68,27 @@ function strayKeysRefusal(
   stray: readonly string[],
   actions: Record<string, ToolDef>,
 ): string {
-  const owners = stray.map((key) => {
-    const takes = Object.entries(actions)
+  const takers = stray.map((key) =>
+    Object.entries(actions)
       .filter(([, member]) => key in member.inputSchema)
-      .map(([name]) => `"${name}"`);
-    return `\`${key}\` is a parameter of action ${takes.join(' or ')}`;
-  });
+      .map(([name]) => name),
+  );
+  const owners = stray.map(
+    (key, i) =>
+      `\`${key}\` is a parameter of action ${(takers[i] ?? []).map((n) => `"${n}"`).join(' or ')}`,
+  );
   const declared = Object.keys(actions[action]?.inputSchema ?? {}).join(', ');
+  // One action that takes every stray key is the correction to name. Otherwise there is none.
+  const [only] = takers[0] ?? [];
+  const oneOwner =
+    only !== undefined && takers.every((names) => 1 === names.length && only === names[0]);
+  const next = oneOwner
+    ? ` Call ${tool} { action: "${only}" } to use them, or call action "${action}" again without them.`
+    : '';
   return (
     `${tool} { action: "${action}" } does not take ${stray.map((k) => `\`${k}\``).join(', ')}, ` +
     'so it was NOT applied — a result computed without it would look like an answer. ' +
-    `${owners.join('; ')}. Action "${action}" takes: ${declared}.`
+    `${owners.join('; ')}. Action "${action}" takes: ${declared}.${next}`
   );
 }
 

@@ -48,7 +48,9 @@ function fakeSession(runtime?: string): Session {
 
 function tool(name: string) {
   const t = TOOLS.find((x) => x.name === name);
-  if (t === undefined) throw new Error(`no tool ${name}`);
+  if (t === undefined) {
+    throw new Error(`no tool ${name}`);
+  }
   return t;
 }
 
@@ -104,7 +106,9 @@ describe('visual tools — temp dir, never touches the repo', () => {
       try {
         await writeFile(capturePath, solidPng([255, 255, 255]));
         const command = vi.fn((name: string) => {
-          if (name !== ReticleCommand.CAPTURE) throw new Error(`Unexpected command: ${name}`);
+          if (name !== ReticleCommand.CAPTURE) {
+            throw new Error(`Unexpected command: ${name}`);
+          }
           return Promise.resolve({ ok: true, result: { ok: true, path: capturePath } });
         });
         const session = { ...fakeSession(runtime), command } as unknown as Session;

@@ -36,8 +36,11 @@ import {
   exactVisibleText,
   fuzzyVisibleText,
   normaliseVisibleText,
+  comparableText,
+  foldTypography,
   paintedCase,
   textMatches,
+  unreadableMatch,
 } from './text-match.js';
 import { pageRoute } from '@/security/page-location.js';
 
@@ -337,13 +340,13 @@ function queryByText(container: HTMLElement, value: string, query: ElementQuery)
 }
 
 function queryByLabel(container: HTMLElement, value: string): HTMLElement[] {
-  const expected = normaliseVisibleText(value).toLowerCase();
+  const expected = comparableText(value).toLowerCase();
   const exact: HTMLElement[] = [];
   const fuzzy: HTMLElement[] = [];
 
   for (const el of elementsUnder(container)) {
     if (!semanticNameTarget(el)) continue;
-    const name = normaliseVisibleText(getAccessibleName(el)).toLowerCase();
+    const name = comparableText(getAccessibleName(el)).toLowerCase();
     if (!name.includes(expected)) continue;
     (name === expected ? exact : fuzzy).push(el);
   }
@@ -654,12 +657,14 @@ export function matchQuery(
     return projected === undefined ? base : { ...base, attrs: projected };
   });
   const covered = dialogCovering(filtered);
+  const unreadable = wantedTextOf(query) === undefined ? undefined : unreadableMatch(described);
   return {
     matched: filtered.length > 0,
     count: filtered.length,
     elements: descriptors,
     ...(scopeMissing ? { scopeMissing: true } : {}),
     ...(covered === undefined ? {} : { coveredBy: covered }),
+    ...(unreadable === undefined ? {} : { unreadable }),
     // On a MISS, carry the same diagnosis `runQuery` has always returned. MATCH is the command every
     // PREDICATE uses, so without this a failed assertion was a dead end ("no element matched") while
     // the identical failure through reticle_query listed the testids that ARE present. Computed only
@@ -785,13 +790,13 @@ function splitTextOwner(
 
 /** The text as the page shows it, when it differs from `wanted` only by case. */
 function caseOnlyMatch(container: HTMLElement, wanted: string): string | undefined {
-  const target = normaliseVisibleText(wanted).toLowerCase();
+  const target = comparableText(wanted).toLowerCase();
   if (0 === target.length) return undefined;
   const memo = new Map<Element, boolean>();
   for (const el of elementsUnder(container)) {
     if (isIgnored(el)) continue;
     const text = normaliseVisibleText(visibleTextOf(el, memo));
-    const at = text.toLowerCase().indexOf(target);
+    const at = foldTypography(text).toLowerCase().indexOf(target);
     if (-1 !== at) return text.slice(at, at + target.length);
   }
   return undefined;
@@ -844,14 +849,14 @@ function nameNearMisses(container: HTMLElement, query: ElementQuery): string[] {
   const role = QueryBy.ROLE === query.by ? query.value : query.role;
   const wanted = query.name;
   if (role === undefined || wanted === undefined || 0 === wanted.length) return [];
-  const target = normaliseVisibleText(wanted).toLowerCase();
+  const target = comparableText(wanted).toLowerCase();
   if (0 === target.length) return [];
   const out: string[] = [];
   for (const el of elementsUnder(container)) {
     if (isIgnored(el) || getRole(el) !== role) continue;
     const name = normaliseVisibleText(getAccessibleName(el));
     if (0 === name.length) continue;
-    const folded = name.toLowerCase();
+    const folded = foldTypography(name).toLowerCase();
     // Equality is impossible here — the exact query already missed — so this is strictly "close".
     if (!folded.includes(target) && !target.includes(folded)) continue;
     if (!out.includes(name)) out.push(name);

@@ -76,7 +76,11 @@ const STATEMENT_RULES: readonly { kind: StatementKind; words: RegExp }[] = [
  * function without changing what is stored.
  */
 export function classifyStatement(text: string): StatementKind {
-  for (const rule of STATEMENT_RULES) if (rule.words.test(text)) return rule.kind;
+  for (const rule of STATEMENT_RULES) {
+    if (rule.words.test(text)) {
+      return rule.kind;
+    }
+  }
   return StatementKind.BUSINESS_INTENT;
 }
 
@@ -112,12 +116,22 @@ export const PromptContextSchema = z.object({
   /** When the request was given, epoch ms. A run long after it is not about it. */
   at: z.number().optional(),
   shared: z.boolean().optional(),
+  /**
+   * What the agent said when it finished the turn this run belongs to: the first `agent_stop`
+   * message at or after the run's last Reticle call, redacted and bounded where it was recorded.
+   * The user's words' counterpart, so it leaves the machine under the same `shared` decision.
+   */
+  closingClaim: z.string().max(20_000).optional(),
+  /** When that turn ended, epoch ms. */
+  closingClaimAt: z.number().optional(),
 });
 export type PromptContext = z.infer<typeof PromptContextSchema>;
 
 /** A run as it may leave this machine: its prompt context only when the project shares it. */
 export function shareableRun(run: unknown): unknown {
-  if ('object' !== typeof run || null === run || !('context' in run)) return run;
+  if ('object' !== typeof run || null === run || !('context' in run)) {
+    return run;
+  }
   const { context, ...rest } = run as { context?: { shared?: unknown } };
   return true === context?.shared ? run : rest;
 }

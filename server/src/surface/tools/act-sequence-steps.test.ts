@@ -452,6 +452,22 @@ describe('an expect this tool cannot parse', () => {
     ).toThrow(/Nothing was acted on/);
   });
 
+  // Real agents wrote these with no `kind`, and each lost a call to the refusal.
+  it('accepts a predicate with no kind when its keys name exactly one kind', () => {
+    expect(() =>
+      assertSequenceSteps([
+        { ref: 'e1', action: 'click', expect: { text: 'Count is 1' } },
+        { ref: 'e2', action: 'click', expect: { allOf: [{ text: 'a' }, { pathname: '/b' }] } },
+      ]),
+    ).not.toThrow();
+  });
+
+  it('names the keys it saw and the kinds there are, when the keys fit no one kind', () => {
+    expect(() =>
+      assertSequenceSteps([{ ref: 'e1', action: 'click', expect: { name: 'order:placed' } }]),
+    ).toThrow(/`name`[\s\S]*one of element, text/);
+  });
+
   it('still accepts every predicate the grader understands', () => {
     expect(() =>
       assertSequenceSteps([

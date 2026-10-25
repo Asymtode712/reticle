@@ -28,17 +28,19 @@ import {
   writeSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative } from 'node:path';
-import { ReticleDir, ReticleEnv } from '@reticlehq/core';
+import { ReticleDir } from '@reticlehq/core';
 import { PromptHookAgent } from '@reticlehq/init';
 import { PromptContextSchema } from '@reticlehq/core/artifacts';
 import { discoverProjectConfigs } from '@/command/cli/config/config-discovery.js';
 import {
   MAX_REQUEST,
-  projectSetting,
+  agentCaptureOff,
+  agentCaptureOffIn,
   promptContextFor,
   redactSecrets,
   sharesRequests,
 } from '@/memory/intent/record-request.js';
+export { agentCaptureOff, agentCaptureOffIn } from '@/memory/intent/record-request.js';
 import { readTextOrUndefined } from '@/memory/project/fs/fs-port.js';
 import {
   WORKSPACE_GITIGNORE,
@@ -73,7 +75,6 @@ const HARNESS_TAGS: readonly string[] = [
   'user-prompt-submit-hook',
 ];
 const HARNESS_PROMPT = new RegExp(`^<(?:${HARNESS_TAGS.join('|')})[\\s>]`);
-const OFF_VALUES: ReadonlySet<string> = new Set(['0', 'false', 'off', 'no']);
 /** Where each agent names its project when the payload does not. */
 const PROJECT_DIR_ENV = ['CLAUDE_PROJECT_DIR', 'CURSOR_PROJECT_DIR', 'GEMINI_PROJECT_DIR'];
 const JSON_INDENT = 2;
@@ -112,12 +113,8 @@ export function promptFromPayload(
   return { prompt, cwd };
 }
 
-/** What the hook prints. Cursor and Gemini read stdout as JSON; the rest need nothing. */
-export function hookAck(agent: string): string {
-  if (PromptHookAgent.CURSOR === agent) return `${JSON.stringify({ continue: true })}\n`;
-  if (PromptHookAgent.GEMINI === agent) return '{}\n';
-  return '';
-}
+/** What the prompt hook prints; one table with the fast path's. */
+export { promptHookAck as hookAck } from './hook-fast.js';
 
 /**
  * The `.reticle` folders a prompt sent from `cwd` belongs in.
@@ -127,10 +124,14 @@ export function hookAck(agent: string): string {
  * from the APP's `.reticle`, so a prompt kept only at the root is a prompt no run ever carries.
  */
 export function captureRoots(cwd: string): string[] {
-  if (!existsSync(cwd)) return [];
+  if (!existsSync(cwd)) {
+    return [];
+  }
   const { found } = discoverProjectConfigs(cwd);
   const nearest = found.find((config) => isWithin(config.directory, cwd));
-  if (nearest === undefined) return [];
+  if (nearest === undefined) {
+    return [];
+  }
   const apps = found.filter(
     (config) =>
       config.directory !== nearest.directory &&
@@ -156,14 +157,18 @@ interface CaptureIo {
 /** Keep one prompt. Never throws: the folders it wrote to, or none. */
 export function capturePrompt(agent: string, raw: string, io: CaptureIo): { written: string[] } {
   try {
-    if (OFF_VALUES.has((io.env[ReticleEnv.PROMPT_CAPTURE] ?? '').toLowerCase())) {
+    if (agentCaptureOff(io.env)) {
       return { written: [] };
     }
     const { prompt, cwd } = promptFromPayload(agent, JSON.parse(raw) as unknown, io.cwd, io.env);
-    if (prompt === undefined || HARNESS_PROMPT.test(prompt.trim())) return { written: [] };
+    if (prompt === undefined || HARNESS_PROMPT.test(prompt.trim())) {
+      return { written: [] };
+    }
     const written: string[] = [];
     for (const root of captureRoots(cwd)) {
-      if (keepIn(root, agent, prompt.trim(), io.now())) written.push(root);
+      if (keepIn(root, agent, prompt.trim(), io.now())) {
+        written.push(root);
+      }
     }
     return { written };
   } catch {
@@ -174,20 +179,30 @@ export function capturePrompt(agent: string, raw: string, io: CaptureIo): { writ
 /** Write one prompt into one `.reticle`. False when the project opted out, or it is a repeat. */
 function keepIn(root: string, agent: string, prompt: string, at: number): boolean {
   const projectDir = dirname(root);
-  if (false === projectSetting(projectDir, 'promptCapture')) return false;
+  if (agentCaptureOffIn(projectDir)) {
+    return false;
+  }
   const requestPath = join(root, ReticleDir.REQUEST_FILE);
   const request = redactSecrets(prompt, MAX_REQUEST);
-  if (repeats(requestPath, request, at)) return false;
+  if (repeats(requestPath, request, at)) {
+    return false;
+  }
   const context = promptContextFor(prompt, [], at, sharesRequests(projectDir, root));
   mkdirSync(root, { recursive: true });
   // The hook can run before any daemon has written `.reticle/.gitignore`: write it, or add the
   // prompt files to an older one, before a prompt lands where `git add -A` would take it.
   const ignorePath = join(root, WORKSPACE_GITIGNORE);
   const ignore = workspaceGitignore(readTextOrUndefined(ignorePath));
-  if (ignore !== undefined) writeFileSync(ignorePath, ignore);
-  const tmp = `${requestPath}.${String(process.pid)}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(context, null, JSON_INDENT)}\n`);
-  renameSync(tmp, requestPath);
+  if (ignore !== undefined) {
+    writeFileSync(ignorePath, ignore);
+  }
+  // Writers run detached and can finish out of order: the request is the NEWEST prompt, so an
+  // older one that lands late goes to the history only.
+  if (!newerHeld(requestPath, at)) {
+    const tmp = `${requestPath}.${String(process.pid)}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(context, null, JSON_INDENT)}\n`);
+    renameSync(tmp, requestPath);
+  }
   const historyPath = join(root, ReticleDir.REQUESTS_LOG_FILE);
   // ponytail: one rotated file; older history is dropped once a second one fills.
   // Every step goes through one open file, so the path cannot change between a check and a write.
@@ -208,11 +223,23 @@ function keepIn(root: string, agent: string, prompt: string, at: number): boolea
   return true;
 }
 
+/** The request file already holds a prompt that arrived after `at`. */
+function newerHeld(requestPath: string, at: number): boolean {
+  try {
+    const held = PromptContextSchema.safeParse(JSON.parse(readFileSync(requestPath, 'utf8')));
+    return held.success && held.data.at !== undefined && held.data.at > at;
+  } catch {
+    return false;
+  }
+}
+
 /** The same prompt was kept a moment ago: a second hook for the same submit. */
 function repeats(requestPath: string, request: string, at: number): boolean {
   try {
     const held = PromptContextSchema.safeParse(JSON.parse(readFileSync(requestPath, 'utf8')));
-    if (!held.success || held.data.at === undefined) return false;
+    if (!held.success || held.data.at === undefined) {
+      return false;
+    }
     return held.data.request === request && at - held.data.at < DUPLICATE_WINDOW_MS;
   } catch {
     return false;

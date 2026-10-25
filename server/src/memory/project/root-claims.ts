@@ -22,11 +22,16 @@ const everClaimed = new Set<string>();
  * in, so a folder that holds a `.reticle` stands for it. Anything else is refused with the path to pass.
  */
 function resolveArtifactRoot(root: string): string {
-  if (!isAbsolute(root))
+  if (!isAbsolute(root)) {
     throw new Error(`root must be an absolute path to a ${ReticleDir.ROOT} folder, got ${root}`);
-  if (ReticleDir.ROOT === basename(root)) return root;
+  }
+  if (ReticleDir.ROOT === basename(root)) {
+    return root;
+  }
   const inside = join(root, ReticleDir.ROOT);
-  if (isDirectory(inside)) return inside;
+  if (isDirectory(inside)) {
+    return inside;
+  }
   throw new Error(
     `root must be the ${ReticleDir.ROOT} folder, or a project folder that contains one, got ${root}. Pass ${inside}`,
   );
@@ -58,8 +63,12 @@ export function claimedArtifactRoot(
   url: string | undefined,
 ): string | undefined {
   const direct = claims.get(sessionId);
-  if (direct !== undefined) return direct;
-  if (url === undefined) return undefined;
+  if (direct !== undefined) {
+    return direct;
+  }
+  if (url === undefined) {
+    return undefined;
+  }
   try {
     const lease = new URL(url).searchParams.get(RETICLE_URL_PARAM.SESSION);
     return null === lease ? undefined : claims.get(lease);
