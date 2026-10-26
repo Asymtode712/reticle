@@ -250,6 +250,7 @@ import {
   dragElement,
   mouseEventFor,
   assertNotLeaving,
+  scrollIntoViewNow,
   clickInputOf,
 } from './actions-dom.js';
 import { scrollFrom } from './scroll.js';
@@ -609,7 +610,7 @@ async function dispatchOther(
       return !down;
     }
     case ActionType.SCROLL_INTO_VIEW:
-      el.scrollIntoView();
+      scrollIntoViewNow(el);
       return false;
     case ActionType.ZOOM:
       /*
