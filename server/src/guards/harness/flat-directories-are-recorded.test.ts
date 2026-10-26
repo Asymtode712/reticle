@@ -311,6 +311,9 @@ const OVER_THE_LINE: Readonly<Record<string, number>> = {
   // one file that names it.
   // +1: js-coverage.ts, the browser engine's code coverage beside the other driven-page capabilities.
   'server/src/portal/input': 12,
+  // 11 with `pool-lease.ts`: the lease types and the pool's limits, split out of browser-pool.ts at
+  // the 1000-line cap (#1705).
+  'server/src/portal/pool': 11,
   // 22 since `session-verdict-facts.ts` was extracted (the count is source files, not tests): both
   // verdict-producing tools were threading the same session facts into `decideVerified` with the
   // same conditional-spread idiom, and a third fact would have been a third copy. Raised on
@@ -343,7 +346,9 @@ const OVER_THE_LINE: Readonly<Record<string, number>> = {
   // `server/src/index.ts` (at its cap) when it gained a progress push per step.
   // 37 with `flow-replayable.ts`: whether a saved flow can replay at all, read by the save, the
   // suite verdict and the suite selection, which all live here.
-  'server/src/language/flows': 37,
+  // +1: flow-start-path.ts, replay's start-page arrival split out of flow-replay-run.ts at the 1000-line cap (#1705).
+  // +1: flow-lease.ts, the leased-context helpers split out of flow-tools.ts at the 1000-line cap (#1705).
+  'server/src/language/flows': 39,
   // 12 since `drive-flow.ts`: the rule that turns a session's ambient tape into a flow per journey,
   // and the gate that refuses to save one asserting nothing. It sits beside `session-end.ts` because
   // teardown is the only caller and the tape is data by then — the reach guard already refused the
