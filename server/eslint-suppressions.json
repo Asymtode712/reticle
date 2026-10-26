@@ -67,14 +67,6 @@
       "count": 1
     }
   },
-  "src/command/cli/cli-doctor.ts": {
-    "curly": {
-      "count": 10
-    },
-    "no-nested-ternary": {
-      "count": 1
-    }
-  },
   "src/command/cli/cli-flow-commands.ts": {
     "curly": {
       "count": 10
