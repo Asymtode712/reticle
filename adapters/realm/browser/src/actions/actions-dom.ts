@@ -189,6 +189,15 @@ function isMeasurable(rect: DOMRect): boolean {
   return rect.width > 0 || rect.height > 0;
 }
 
+/**
+ * Scroll an element into view at once. A bare `scrollIntoView()` follows the page's CSS
+ * `scroll-behavior`, and `smooth` makes it an animation: the call returns with the element still
+ * off screen, so the next reading judges a button that is about to arrive as outside the viewport.
+ */
+export function scrollIntoViewNow(el: Element, options: ScrollIntoViewOptions = {}): void {
+  el.scrollIntoView({ ...options, behavior: 'instant' });
+}
+
 /** The center of `rect` falls outside the visible viewport. */
 export function isOffViewport(el: Element, rect: DOMRect): boolean {
   const win = el.ownerDocument.defaultView;
@@ -245,7 +254,7 @@ export function clickGeometry(el: ActionTarget): ClickGeometry {
   }
   let scrolledIntoView = false;
   if (isOffViewport(el, rect) && 'function' === typeof el.scrollIntoView) {
-    el.scrollIntoView({ block: 'center', inline: 'center' });
+    scrollIntoViewNow(el, { block: 'center', inline: 'center' });
     scrolledIntoView = true;
     rect = el.getBoundingClientRect();
   }

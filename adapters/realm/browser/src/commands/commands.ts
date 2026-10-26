@@ -32,7 +32,7 @@ import { sanitizeWithReport } from '@/security/serialization.js';
 import { getCapabilities } from '@/registry/capabilities.js';
 import { freezeClock, advanceClock, resetClock, isClockFrozen } from '@/timers/clock.js';
 import { scrollContainer } from '@/actions/scroll.js';
-import { isOffViewport } from '@/actions/actions-dom.js';
+import { isOffViewport, scrollIntoViewNow } from '@/actions/actions-dom.js';
 
 export type CommandHandler = (args: Record<string, unknown>) => unknown;
 
@@ -105,7 +105,7 @@ function inspect(ref: string, reveal = false): unknown {
     'function' === typeof el.scrollIntoView &&
     isOffViewport(el, el.getBoundingClientRect());
   if (scrolledIntoView) {
-    el.scrollIntoView({ block: 'center', inline: 'center' });
+    scrollIntoViewNow(el, { block: 'center', inline: 'center' });
   }
   const rect = el.getBoundingClientRect();
   const component = identifyComponent(el);
