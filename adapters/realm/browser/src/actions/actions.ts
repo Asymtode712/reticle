@@ -23,7 +23,7 @@ import {
   isAutofillSafeTarget,
   setNativeValue,
 } from './value-input.js';
-import { getStates } from '@/dom/a11y.js';
+import { getRole, getStates } from '@/dom/a11y.js';
 import { isVisible } from '@/dom/visibility.js';
 import { elementHasHoverHandlers } from '@/registry/stores/adapters.js';
 import {
@@ -333,6 +333,16 @@ export const ZOOM_NEEDS_REAL_BROWSER_MSG =
   'viewport, visualViewport or media queries, so a layout that breaks at 200% would be reported as ' +
   'checked and passing. Drive a real browser (reticle drive <url>, or reticle_lease) and zoom there.';
 
+/** Radix Select, Headless UI Listbox and the like: a trigger that opens a `role="listbox"` popup. */
+function isAriaCombobox(el: Element): boolean {
+  return 'combobox' === getRole(el) || 'listbox' === el.getAttribute('aria-haspopup');
+}
+
+/** Why `select` refuses a custom combobox, and the two steps that do work. */
+const SELECT_ON_COMBOBOX_MSG = (tag: string): string =>
+  `cannot select on a <${tag}> — it is an ARIA combobox, not a native <select>. ` +
+  'Click the combobox to open it, then click the option with { role: "option", name: "<label>" }.';
+
 /** A finite number from the wire, or undefined. Non-numbers are "not asked for", never zero. */
 function asFiniteNumber(raw: unknown): number | undefined {
   return 'number' === typeof raw && Number.isFinite(raw) ? raw : undefined;
@@ -475,6 +485,9 @@ async function dispatchOther(
         el.value = wanted;
         el.dispatchEvent(new Event('change', { bubbles: true }));
         return false; // change is not cancelable.
+      }
+      if (isAriaCombobox(el)) {
+        throw new Error(SELECT_ON_COMBOBOX_MSG(el.tagName.toLowerCase()));
       }
       throw new Error(`cannot select on a <${el.tagName.toLowerCase()}>`);
     case ActionType.CHECK:
