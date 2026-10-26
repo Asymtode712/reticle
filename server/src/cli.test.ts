@@ -473,7 +473,9 @@ describe('parseCliArgs', () => {
     ]) {
       const r = parseCliArgs(argv, PORT);
       expect(r.kind, argv.join(' ')).toBe('error');
-      if (r.kind !== 'error') throw new Error('unreachable');
+      if (r.kind !== 'error') {
+        throw new Error('unreachable');
+      }
       expect(r.message).toContain('explore');
     }
   });
@@ -734,6 +736,41 @@ describe('parseCliArgs', () => {
       http: true,
       httpPort: 9100,
       httpToken: 't',
+    });
+  });
+
+  /**
+   * `reticle serve --http --http-port 4400` listened on the bridge and died with a raw
+   * EADDRINUSE. The bridge port is the default the caller resolved, then `--port`. The refusal
+   * names both numbers before anything listens.
+   */
+  it('refuses --http-port when it equals the effective bridge port', () => {
+    const refused = (httpPort: number, bridgePort: number): string =>
+      `--http-port ${String(httpPort)} is the bridge port ${String(bridgePort)}. ` +
+      'Pick another port. MCP is already served on the bridge port.';
+
+    expect(parseCliArgs(['serve', '--http', '--http-port', '4400'], 4400)).toEqual({
+      kind: 'error',
+      message: refused(4400, 4400),
+    });
+    // `--port` replaces the resolved default, whichever order the flags are in.
+    expect(
+      parseCliArgs(['serve', '--http-port', '5000', '--http', '--port', '5000'], 4400),
+    ).toEqual({ kind: 'error', message: refused(5000, 5000) });
+    // The resolved default is the bridge port when no `--port` flag is present.
+    expect(parseCliArgs(['mcp', '--http', '--http-port', '5000'], 5000)).toEqual({
+      kind: 'error',
+      message: refused(5000, 5000),
+    });
+    expect(
+      parseCliArgs(['_daemon', '--port', '4400', '--http', '--http-port', '4400'], 7333),
+    ).toEqual({ kind: 'error', message: refused(4400, 4400) });
+    // A verify port that is not the bridge port is still accepted, including literal 4400.
+    expect(parseCliArgs(['serve', '--http', '--http-port', '4400'], 5000)).toMatchObject({
+      kind: 'serve',
+      port: 5000,
+      http: true,
+      httpPort: 4400,
     });
   });
 
