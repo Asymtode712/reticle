@@ -191,6 +191,31 @@ describe('reticle_viewport sets media on a lease', () => {
     expect(calls).toEqual([{ media: { reducedMotion: 'reduce', colorScheme: 'dark' } }]);
   });
 
+  it('answers the size the lease already has when only media is given (#1902)', async () => {
+    const pool = {
+      emulateLease: () => Promise.resolve(true),
+      viewportOfLease: () => Promise.resolve({ width: 390, height: 844 }),
+    } as unknown as ToolDeps['pool'];
+    const res = (await tool().handler(depsWith(undefined, pool), {
+      colorScheme: 'dark',
+    })) as Record<string, unknown>;
+
+    expect(res['applied']).toBe(true);
+    expect(res['colorScheme']).toBe('dark');
+    expect(res['width']).toBe(390);
+    expect(res['height']).toBe(844);
+  });
+
+  it('leaves the size out when only media is given and the lease size cannot be read (#1902)', async () => {
+    const res = (await tool().handler(depsWith(undefined, leasePool([])), {
+      colorScheme: 'dark',
+    })) as Record<string, unknown>;
+
+    expect(res['applied']).toBe(true);
+    expect(res).not.toHaveProperty('width');
+    expect(res).not.toHaveProperty('height');
+  });
+
   it('resizes and sets media in one call', async () => {
     const calls: unknown[] = [];
     await tool().handler(depsWith(undefined, leasePool(calls)), {

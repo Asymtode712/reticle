@@ -114,8 +114,8 @@ export const VIEWPORT_TOOLS: ToolDef[] = [
     },
     outputSchema: {
       applied: z.boolean(),
-      width: z.number(),
-      height: z.number(),
+      width: z.number().optional(),
+      height: z.number().optional(),
       observed: z.object({ width: z.number(), height: z.number() }).optional(),
       colorScheme: z.string().optional(),
       reducedMotion: z.string().optional(),
@@ -128,7 +128,10 @@ export const VIEWPORT_TOOLS: ToolDef[] = [
       if (media !== undefined && args['width'] === undefined && args['height'] === undefined) {
         const session = deps.sessions.resolve(asString(args['sessionId']));
         if (true === (await deps.pool?.emulateLease(session.id, media))) {
-          return { applied: true, width: 0, height: 0, ...media };
+          // No size was asked for, so answer the one the lease has; 0 by 0 reads as a broken
+          // viewport (#1902). When the page cannot be read, leave the size out.
+          const size = await deps.pool?.viewportOfLease(session.id);
+          return { applied: true, ...size, ...media };
         }
         return { ...refused(), recommendation: MEDIA_NEEDS_A_LEASE };
       }
