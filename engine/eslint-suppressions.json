@@ -277,11 +277,6 @@
       "count": 25
     }
   },
-  "src/question/predicate/predicate-eval.ts": {
-    "curly": {
-      "count": 39
-    }
-  },
   "src/question/predicate/predicate-parse.ts": {
     "curly": {
       "count": 9
@@ -402,11 +397,6 @@
   "src/window/json-salvage.ts": {
     "curly": {
       "count": 6
-    }
-  },
-  "src/window/network-detail-merge.ts": {
-    "curly": {
-      "count": 4
     }
   },
   "src/window/ring-buffer-armed-window.test.ts": {

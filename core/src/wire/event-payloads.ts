@@ -1,5 +1,6 @@
 import * as z from 'zod';
 import { CanvasTrigger, EventType, MediaEvent, PerfMetric } from './constants/constants.js';
+import { ResponseBodyReason } from './constants/response-body-reason.js';
 import { BlindSpotKind } from '@/verdict/verified-constants.js';
 import { BrowserBrand } from '@/telemetry-feedback.js';
 import { HudUseDataSchema, HumanControlDataSchema, HumanMarkDataSchema } from './messages.js';
@@ -366,6 +367,17 @@ export const EVENT_PAYLOAD_SCHEMAS = {
       status: z.number(),
       headers: z.record(z.string(), z.string()),
       resourceType: z.string().optional(),
+    })
+    .passthrough(),
+  [EventType.NET_RESPONSE_BODY]: z
+    .object({
+      id: z.string(),
+      method: z.string(),
+      url: z.string(),
+      urlRaw: z.string().optional(),
+      responseBody: z.string(),
+      responseBodyTruncated: z.boolean().optional(),
+      responseBodyReason: z.nativeEnum(ResponseBodyReason).optional(),
     })
     .passthrough(),
   [EventType.HUMAN_CONTROL]: HumanControlDataSchema,

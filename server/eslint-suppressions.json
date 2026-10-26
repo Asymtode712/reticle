@@ -2360,11 +2360,6 @@
       "count": 1
     }
   },
-  "src/memory/journal/self-observation.ts": {
-    "curly": {
-      "count": 1
-    }
-  },
   "src/memory/journal/session-end-live.test.ts": {
     "curly": {
       "count": 1

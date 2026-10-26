@@ -435,11 +435,6 @@
       "count": 2
     }
   },
-  "src/observers/net-detail/network-body.ts": {
-    "curly": {
-      "count": 7
-    }
-  },
   "src/observers/network-error-bodies.test.ts": {
     "curly": {
       "count": 1
@@ -450,24 +445,9 @@
       "count": 5
     }
   },
-  "src/observers/network.body-reason.test.ts": {
-    "curly": {
-      "count": 3
-    }
-  },
-  "src/observers/network.streaming.test.ts": {
-    "curly": {
-      "count": 1
-    }
-  },
   "src/observers/network.test.ts": {
     "curly": {
       "count": 8
-    }
-  },
-  "src/observers/network.ts": {
-    "curly": {
-      "count": 37
     }
   },
   "src/observers/network.wrapper-blindspot.test.ts": {

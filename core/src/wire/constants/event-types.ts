@@ -96,6 +96,8 @@ export const EventType = {
    * matching in-page NET_REQUEST so the driven view never loses fidelity to an outside-in tool.
    */
   NET_DETAIL: 'net.detail',
+  /** SDK response body captured after headers. Matched to its NET_REQUEST by id, method and URL. */
+  NET_RESPONSE_BODY: 'net.response-body',
   /**
    * Live-control: browser → bridge. A human acted on the presenter panel.
    * `data: { kind: HumanControlKind; text?: string }`. Rides the existing EventMessage.
