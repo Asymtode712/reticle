@@ -63,6 +63,7 @@ const OVER_THE_LINE: Readonly<Record<string, number>> = {
   // and snapshot reads it, so a subdirectory would be two directories that need each other.
   // +1: visibility.ts, the visibility checks split out of a11y.ts at the 1000-line cap (#1662).
   // +1: query-finders.ts, the finder for each query field, split out of query.ts at the 1000-line cap (#1662).
+  'adapters/realm/browser/src/actions': 11,
   'adapters/realm/browser/src/dom': 18,
   // +1: error-repeats.ts, the limiter every uncaught-error path in console.ts goes through (#986).
   'adapters/realm/browser/src/observers': 27,

@@ -26,6 +26,7 @@ import {
 } from './value-input.js';
 import { getRole, getStates } from '@/dom/a11y.js';
 import { isVisible } from '@/dom/visibility.js';
+import { selectInCombobox } from './select-combobox.js';
 import { elementHasHoverHandlers } from '@/registry/stores/adapters.js';
 import {
   type ActionTarget,
@@ -498,7 +499,17 @@ async function dispatchOther(
         return false; // change is not cancelable.
       }
       if (isAriaCombobox(el)) {
-        throw new Error(SELECT_ON_COMBOBOX_MSG(el.tagName.toLowerCase()));
+        if (typeof args['value'] !== 'string') {
+          throw new Error(
+            "select requires a string `value` — pass it nested, as args: { value: '…' }.",
+          );
+        }
+        return await selectInCombobox(
+          el,
+          args['value'],
+          (target) => fireClickSequence(target),
+          SELECT_ON_COMBOBOX_MSG(el.tagName.toLowerCase()),
+        );
       }
       throw new Error(`cannot select on a <${el.tagName.toLowerCase()}>`);
     case ActionType.CHECK:
