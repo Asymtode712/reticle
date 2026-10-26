@@ -11,6 +11,8 @@
  */
 import { takeJsCoverage, type ScriptCoverage } from './js-coverage.js';
 import type { Browser, Page } from 'playwright';
+import { DriveError } from './drive-error.js';
+import { pressViaKeyboard } from './real-input-press.js';
 import { stampedDriveUrl } from './drive-url-stamp.js';
 import { launchChromium } from '@/launch-chromium.js';
 import {
@@ -24,14 +26,11 @@ import { getSessionMetrics } from '@/telemetry/session-metrics.js';
 import { classifyConnectFailure } from '@/telemetry/connect-failure.js';
 import {
   ActionType,
-  clampHoldMs,
   DriveErrorCode,
   DRIVE_PLAYWRIGHT_MISSING_MSG,
-  explicitCodeFromArgs,
+  ClickButton,
+  clickButtonFromArgs,
   InputMode,
-  InputModeReason,
-  pressKeyFromArgs,
-  pressKeysFromArgs,
   pressModifiersFromArgs,
 } from '@reticlehq/core';
 import { installNetworkMocks, type MockRule } from './network-mock.js';
@@ -59,6 +58,8 @@ export type RealInputArgs = {
   key?: string;
   /** For press: modifier names (Meta/Control/Shift/Alt; aliases like `cmd` accepted). */
   modifiers?: string[];
+  /** For click: which mouse button to press (left, middle or right). Absent means left. */
+  button?: string;
   /**
    * For press: several keys held down TOGETHER, pressed in order and released in reverse. Read but
    * never forwarded — a chord with a non-modifier key has no `page.keyboard.press` spelling, so the
@@ -181,15 +182,8 @@ export interface OwnedRealInputProvider extends RealInputProvider {
   dispose(): Promise<void>;
 }
 
-/** Structured, code-tagged failure so callers branch on cause, not message text. */
-export class DriveError extends Error {
-  readonly code: DriveErrorCode;
-  constructor(code: DriveErrorCode, message: string) {
-    super(message);
-    this.code = code;
-    this.name = 'DriveError';
-  }
-}
+export { DriveError };
+export { unspellablePressReason } from './real-input-press.js';
 
 /** Center of a viewport box in CSS px. Pure — unit-tested directly. */
 export function boxCenter(box: ElementBox): { cx: number; cy: number } {
@@ -235,159 +229,12 @@ const DEFAULT_DRAG_STEPS = 8;
 type SleepFn = (ms: number) => Promise<void>;
 type ConnectFn = (url: string) => Promise<Browser>;
 
-/**
- * Drive a `press` with a real keyboard — coordinate-free; the key goes to whatever holds focus.
- * Key and modifiers come from the same core helpers the synthetic dispatcher uses, so the two paths
- * cannot read the same args differently.
- *
- * A `holdMs` splits the chord into down / wait / up, the same shape the page uses for a held key.
- * `keyboard.press` would send it instantly instead, reporting a hold-to-confirm that never held.
- * The one thing this cannot reproduce is the auto-repeat a held key emits: the driver sends a single
- * keydown, where the in-page path sends the repeats a browser would. Named rather than papered over
- * — an app that counts repeats needs the synthetic path, and a caller that sees a held key do
- * nothing now has a reason to try it.
- */
-async function pressViaKeyboard(
-  page: Page,
-  args: RealInputArgs,
-  sleep: SleepFn,
-  now: () => number,
-): Promise<number> {
-  const key = pressKeyFromArgs(args);
-  const modifiers = pressModifiersFromArgs(args);
-  const chord = 0 < modifiers.length ? `${modifiers.join('+')}+${key}` : key;
-  const holdMs = clampHoldMs(args.holdMs);
-  if (0 === holdMs) {
-    // `press` DOES take a chord string ("Control+k"), so the tap path needs no splitting.
-    await page.keyboard.press(chord);
-    return 0;
+/** The mouse options a click needs: the button, only when it is not the default left one. */
+function clickOptionsOf(args: RealInputArgs): { button: 'middle' | 'right' } | undefined {
+  const button = clickButtonFromArgs({ button: args.button });
+  if (button === ClickButton.RIGHT || button === ClickButton.MIDDLE) {
+    return { button };
   }
-  /*
-   * `down`/`up` take ONE key each, unlike `press`: `down('Control+k')` throws
-   * `Unknown key: "Control+k"` — measured on a real Chromium, not assumed. The chord string the
-   * tap path uses therefore cannot express a hold, so the chord is split here: modifiers down in
-   * chord order, the key last, and released in reverse (key first, modifiers reversed), which is
-   * what a hand does and what an app's keyup bookkeeping expects.
-   *
-   * Without the split a held shortcut threw before a single key moved, the caller fell back to
-   * the synthetic path, and a real hold was impossible for any press with modifiers — the exact
-   * gesture `holdMs` exists for.
-   *
-   * ## Why every key that went down is tracked, and every exit path cleans up
-   *
-   * The down calls are the ones that MOVE the keyboard, and they can fail partway: `Control` goes
-   * down, the key after it rejects, and the driver's copy of `Control` is still held. That path
-   * used to fall straight to the caller's synthetic replay — which presses the same chord again on
-   * a keyboard that is already holding a modifier. Tracking what actually went down is what makes
-   * the cleanup below able to release the right keys, and only those: releasing a key that never
-   * went down is its own lie, and it would turn a clean failure into an unnecessary refusal.
-   */
-  const pressed: string[] = [];
-  const pressDown = async (k: string): Promise<void> => {
-    await page.keyboard.down(k);
-    pressed.push(k);
-  };
-  try {
-    for (const modifier of modifiers) await pressDown(modifier);
-    await pressDown(key);
-  } catch (error) {
-    // The chord is PARTIALLY down. Release what is held before reporting the failure; if that
-    // cannot be proved, `releaseKeys` throws RELEASE_FAILED and the caller refuses the replay —
-    // the same rule as a failed release on the ordinary path, for the same reason. Only when the
-    // cleanup DOES succeed is the original error safe to hand back.
-    await releaseKeys(page, pressed);
-    throw error;
-  }
-  const startedAt = now();
-  try {
-    await sleep(holdMs);
-  } catch (error) {
-    // The wait failed, and the caller is about to run the synthetic path — which presses this SAME
-    // key a second time. If the driver's copy stays down, a held modifier then colours every later
-    // action for the rest of the run. Best-effort on purpose: whatever went wrong with the wait is
-    // the error worth reporting. A cleanup that cannot be proved is the exception — that one is a
-    // stuck key, and it must reach the caller as a refusal rather than be swallowed.
-    try {
-      await releaseKeys(page, pressed);
-    } catch {
-      throw new DriveError(
-        DriveErrorCode.RELEASE_FAILED,
-        'the wait failed and the keys it pressed could not be released, so they may still be held',
-      );
-    }
-    throw error;
-  }
-  // NOT best-effort: on the ordinary path a failed release is a real failure the caller must hear
-  // about, and swallowing it would report a press whose key is still down.
-  await releaseKeys(page, pressed);
-  return now() - startedAt;
-}
-
-/**
- * Release the given keys, in reverse press order, and report a failure as one that leaves the
- * keyboard UNKNOWN rather than as an ordinary provider error.
- *
- * Every release is attempted even after one fails: a stuck `Control` is worse than a stuck letter,
- * so a failure on one key must not skip the rest. The first failure is what is thrown, since it is
- * the one that happened first, and it is wrapped in `DriveError` so the caller can tell "this
- * gesture failed" from "this gesture may have left a key down" — the difference between a safe
- * synthetic replay and an unsafe one.
- */
-async function releaseKeys(page: Page, pressed: readonly string[]): Promise<void> {
-  let failure: unknown;
-  for (const k of [...pressed].reverse()) {
-    try {
-      await page.keyboard.up(k);
-    } catch (error) {
-      failure ??= error;
-    }
-  }
-  if (failure !== undefined) {
-    throw new DriveError(
-      DriveErrorCode.RELEASE_FAILED,
-      `the key was pressed but could not be released, so it may still be held: ${describeFailure(failure)}`,
-    );
-  }
-}
-
-/**
- * A thrown value as a line a reader can act on.
- *
- * Not `String(error)`: a non-Error thrown value (a rejected plain object, an SDK that throws a
- * record) stringifies to `[object Object]`, which names nothing and hides the one fact the message
- * exists to carry. Anything that is neither an Error nor a string says so rather than pretending.
- */
-function describeFailure(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return 'string' === typeof error ? error : 'an unknown error';
-}
-
-/**
- * The `press`es this module will NOT drive: a chord that only the in-page dispatcher can express.
- *
- * `args.keys` asks for several keys held down TOGETHER, pressed in order and released in reverse.
- * That is not a `page.keyboard.press` chord — a non-modifier key cannot appear before the last `+`
- * — and a real keyboard cannot aim a key at a named element. `args.code` is the third: the driver
- * presses by KEY name and offers no way to send a physical `code` that disagrees with it, so
- * `{ text: 'z', code: 'KeyY' }` would strike a different key than the one asked for. All three are
- * routed to the synthetic path by the caller, which reports the reason rather than pretending a
- * different gesture happened.
- *
- * Ordered by how specifically the caller asked: `keys` then `code` name the KEY, `ref` names only
- * the target. Two can apply at once, and the earlier one is the more unusual request — the reason
- * should name that, not the generic "you passed a ref".
- */
-export function unspellablePressReason(
-  ref: string,
-  args: Record<string, unknown>,
-): InputModeReason | undefined {
-  if (0 < pressKeysFromArgs(args).length) {
-    return InputModeReason.SYNTHETIC_MULTI_KEY_PRESS_PREFERRED;
-  }
-  if (explicitCodeFromArgs(args) !== undefined) {
-    return InputModeReason.SYNTHETIC_KEY_CODE_PRESS_PREFERRED;
-  }
-  if (0 < ref.length) return InputModeReason.SYNTHETIC_ELEMENT_PRESS_PREFERRED;
   return undefined;
 }
 
@@ -432,18 +279,30 @@ export async function performGesture(
     await sleep(REAL_INPUT_SETTLE_MS);
     return real(true);
   }
-  if (action === ActionType.CLICK) {
+  if (action === ActionType.CLICK || action === ActionType.DBLCLICK) {
     await page.mouse.move(cx, cy);
-    await page.mouse.click(cx, cy);
-    return real(true);
-  }
-  if (action === ActionType.DBLCLICK) {
-    await page.mouse.move(cx, cy);
-    await page.mouse.dblclick(cx, cy);
+    const options = clickOptionsOf(args);
+    const modifiers = pressModifiersFromArgs(args);
+    for (const modifier of modifiers) {
+      await page.keyboard.down(modifier);
+    }
+    try {
+      if (action === ActionType.CLICK) {
+        await page.mouse.click(cx, cy, options);
+      } else {
+        await page.mouse.dblclick(cx, cy, options);
+      }
+    } finally {
+      for (const modifier of [...modifiers].reverse()) {
+        await page.keyboard.up(modifier);
+      }
+    }
     return real(true);
   }
   if (action === ActionType.DRAG) {
-    if (args.toBox === undefined) return real(false);
+    if (args.toBox === undefined) {
+      return real(false);
+    }
     const dst = boxCenter(args.toBox);
     const steps = args.steps ?? DEFAULT_DRAG_STEPS;
     await page.mouse.move(cx, cy);
@@ -561,7 +420,9 @@ export class CdpRealInputProvider implements RealInputProvider {
   /** Attach the response listener the first time we see a page; a no-op afterwards. */
   #listen(page: Page): void {
     const sink = this.#onNetworkDetail;
-    if (sink === undefined || this.#listening.has(page)) return;
+    if (sink === undefined || this.#listening.has(page)) {
+      return;
+    }
     this.#listening.add(page);
     attachNetworkDetail(page, sink);
   }
@@ -574,7 +435,9 @@ export class CdpRealInputProvider implements RealInputProvider {
       // Playwright's Browser exposes isConnected(); a test fake may not, so only an EXPLICIT false
       // drops the cache — a fake without the method is assumed live.
       const alive = this.#browser.isConnected?.() ?? true;
-      if (alive) return this.#browser;
+      if (alive) {
+        return this.#browser;
+      }
       this.#browser = undefined; // fall through and reconnect
     }
     try {
@@ -588,12 +451,16 @@ export class CdpRealInputProvider implements RealInputProvider {
 
   async #pageFor(sessionUrl: string): Promise<Page | undefined> {
     const browser = await this.#ensureBrowser();
-    if (browser === undefined) return undefined;
+    if (browser === undefined) {
+      return undefined;
+    }
     const page = selectPage(
       browser.contexts().flatMap((c) => c.pages()),
       sessionUrl,
     );
-    if (page !== undefined) this.#listen(page);
+    if (page !== undefined) {
+      this.#listen(page);
+    }
     return page;
   }
 
@@ -617,21 +484,27 @@ export class CdpRealInputProvider implements RealInputProvider {
     args: RealInputArgs,
   ): Promise<RealInputResult> {
     const page = await this.#pageFor(sessionUrl);
-    if (page === undefined) return undriven(action, box);
+    if (page === undefined) {
+      return undriven(action, box);
+    }
     return performGesture(page, action, box, args, this.#sleep, this.#now);
   }
 
   /** PNG of the correlated page, or undefined if none matches. */
   async screenshot(sessionUrl: string, opts: ScreenshotOpts): Promise<Uint8Array | undefined> {
     const page = await this.#pageFor(sessionUrl);
-    if (page === undefined) return undefined;
+    if (page === undefined) {
+      return undefined;
+    }
     return capturePage(page, opts);
   }
 
   /** The context's cookies and per-origin storage; undefined when no driven page matches. */
   async storageState(sessionUrl: string): Promise<unknown> {
     const page = await this.#pageFor(sessionUrl);
-    if (page === undefined) return undefined;
+    if (page === undefined) {
+      return undefined;
+    }
     return page.context().storageState();
   }
 
@@ -643,18 +516,24 @@ export class CdpRealInputProvider implements RealInputProvider {
    */
   async applyStorageState(sessionUrl: string, state: unknown): Promise<boolean> {
     const page = await this.#pageFor(sessionUrl);
-    if (page === undefined) return false;
+    if (page === undefined) {
+      return false;
+    }
     const saved = state as {
       cookies?: Parameters<ReturnType<Page['context']>['addCookies']>[0];
       origins?: { origin: string; localStorage?: { name: string; value: string }[] }[];
     };
-    if (saved.cookies !== undefined) await page.context().addCookies(saved.cookies);
+    if (saved.cookies !== undefined) {
+      await page.context().addCookies(saved.cookies);
+    }
     for (const origin of saved.origins ?? []) {
       // Only the document for an origin can write that origin's localStorage, so this is applied in
       // the page rather than through the context. A page sitting on a different origin cannot be
       // given another origin's storage, and silently succeeding there would be the quiet half-restore
       // this whole path exists to avoid.
-      if (!page.url().startsWith(origin.origin)) continue;
+      if (!page.url().startsWith(origin.origin)) {
+        continue;
+      }
       await page.evaluate((entries: { name: string; value: string }[]) => {
         // Reached through `globalThis` rather than `window`: this body is serialised and runs in the
         // PAGE, but it is typechecked here, and this package never pulls in the DOM lib — a server
@@ -662,8 +541,12 @@ export class CdpRealInputProvider implements RealInputProvider {
         const store = (
           globalThis as { localStorage?: { setItem(key: string, value: string): void } }
         ).localStorage;
-        if (store === undefined) return;
-        for (const entry of entries) store.setItem(entry.name, entry.value);
+        if (store === undefined) {
+          return;
+        }
+        for (const entry of entries) {
+          store.setItem(entry.name, entry.value);
+        }
       }, origin.localStorage ?? []);
     }
     return true;
@@ -672,7 +555,9 @@ export class CdpRealInputProvider implements RealInputProvider {
   /** Apply network-mock rules to the correlated page; false when no driven page matches. */
   async setMocks(sessionUrl: string, rules: MockRule[]): Promise<boolean> {
     const page = await this.#pageFor(sessionUrl);
-    if (page === undefined) return false;
+    if (page === undefined) {
+      return false;
+    }
     await installNetworkMocks(page, rules);
     return true;
   }
@@ -680,7 +565,9 @@ export class CdpRealInputProvider implements RealInputProvider {
   /** Pin the correlated page's viewport to fixed dimensions; false when no driven page matches. */
   async setViewport(sessionUrl: string, size: { width: number; height: number }): Promise<boolean> {
     const page = await this.#pageFor(sessionUrl);
-    if (page === undefined) return false;
+    if (page === undefined) {
+      return false;
+    }
     await page.setViewportSize({ width: size.width, height: size.height });
     return true;
   }
@@ -689,7 +576,9 @@ export class CdpRealInputProvider implements RealInputProvider {
   async dispose(): Promise<void> {
     const browser = this.#browser;
     this.#browser = undefined;
-    if (browser !== undefined) await browser.close();
+    if (browser !== undefined) {
+      await browser.close();
+    }
   }
 }
 
@@ -785,7 +674,9 @@ export class LaunchedRealInputProvider implements OwnedRealInputProvider {
     );
     this.#page = page;
     // Capture CDP-authoritative response detail into the driven session's journal (best-effort).
-    if (this.#onNetworkDetail !== undefined) attachNetworkDetail(page, this.#onNetworkDetail);
+    if (this.#onNetworkDetail !== undefined) {
+      attachNetworkDetail(page, this.#onNetworkDetail);
+    }
     try {
       // Same navigation rule as the pool, and for the same measured reason: Playwright's default
       // waits for `load`, which an app with one never-finishing subresource never fires — 30s of
@@ -810,7 +701,9 @@ export class LaunchedRealInputProvider implements OwnedRealInputProvider {
    */
   async #tryInjectConnect(page: Page): Promise<void> {
     const opts = this.#injectConnect;
-    if (opts === undefined) return;
+    if (opts === undefined) {
+      return;
+    }
     try {
       await page.waitForFunction('!!globalThis.__reticleInstance', {
         timeout: INJECT_CONNECT_WAIT_MS,
@@ -834,7 +727,9 @@ export class LaunchedRealInputProvider implements OwnedRealInputProvider {
    */
   #livePage(): Page | undefined {
     const page = this.#page;
-    if (page === undefined) return undefined;
+    if (page === undefined) {
+      return undefined;
+    }
     if (true === page.isClosed?.()) {
       this.#page = undefined; // never ask a corpse twice
       return undefined;
@@ -844,8 +739,12 @@ export class LaunchedRealInputProvider implements OwnedRealInputProvider {
 
   isAvailableFor(sessionUrl: string): Promise<boolean> {
     const page = this.#livePage();
-    if (page === undefined) return Promise.resolve(false);
-    if (page.url() === sessionUrl) return Promise.resolve(true);
+    if (page === undefined) {
+      return Promise.resolve(false);
+    }
+    if (page.url() === sessionUrl) {
+      return Promise.resolve(true);
+    }
     return Promise.resolve(stripVolatile(page.url()) === stripVolatile(sessionUrl));
   }
 
@@ -859,7 +758,9 @@ export class LaunchedRealInputProvider implements OwnedRealInputProvider {
    */
   async storageState(_sessionUrl: string): Promise<unknown> {
     const page = this.#livePage();
-    if (page === undefined) return undefined;
+    if (page === undefined) {
+      return undefined;
+    }
     return page.context().storageState();
   }
 
@@ -869,22 +770,32 @@ export class LaunchedRealInputProvider implements OwnedRealInputProvider {
    */
   async applyStorageState(_sessionUrl: string, state: unknown): Promise<boolean> {
     const page = this.#livePage();
-    if (page === undefined) return false;
+    if (page === undefined) {
+      return false;
+    }
     const saved = state as {
       cookies?: Parameters<ReturnType<Page['context']>['addCookies']>[0];
       origins?: { origin: string; localStorage?: { name: string; value: string }[] }[];
     };
-    if (saved.cookies !== undefined) await page.context().addCookies(saved.cookies);
+    if (saved.cookies !== undefined) {
+      await page.context().addCookies(saved.cookies);
+    }
     for (const origin of saved.origins ?? []) {
       // A page sitting on a different origin cannot be given another origin's storage, and silently
       // succeeding there is the quiet half-restore this whole path exists to avoid.
-      if (!page.url().startsWith(origin.origin)) continue;
+      if (!page.url().startsWith(origin.origin)) {
+        continue;
+      }
       await page.evaluate((entries: { name: string; value: string }[]) => {
         const store = (
           globalThis as { localStorage?: { setItem(key: string, value: string): void } }
         ).localStorage;
-        if (store === undefined) return;
-        for (const entry of entries) store.setItem(entry.name, entry.value);
+        if (store === undefined) {
+          return;
+        }
+        for (const entry of entries) {
+          store.setItem(entry.name, entry.value);
+        }
       }, origin.localStorage ?? []);
     }
     return true;
@@ -897,14 +808,18 @@ export class LaunchedRealInputProvider implements OwnedRealInputProvider {
     args: RealInputArgs,
   ): Promise<RealInputResult> {
     const page = this.#livePage();
-    if (page === undefined) return Promise.resolve(undriven(action, box));
+    if (page === undefined) {
+      return Promise.resolve(undriven(action, box));
+    }
     return performGesture(page, action, box, args, this.#sleep, this.#now);
   }
 
   /** PNG of the owned page, or undefined before navigate / after dispose. */
   screenshot(_sessionUrl: string, opts: ScreenshotOpts): Promise<Uint8Array | undefined> {
     const page = this.#livePage();
-    if (page === undefined) return Promise.resolve(undefined);
+    if (page === undefined) {
+      return Promise.resolve(undefined);
+    }
     return capturePage(page, opts);
   }
 
@@ -921,7 +836,9 @@ export class LaunchedRealInputProvider implements OwnedRealInputProvider {
     size: { width: number; height: number },
   ): Promise<boolean> {
     const page = this.#livePage();
-    if (page === undefined) return false;
+    if (page === undefined) {
+      return false;
+    }
     await page.setViewportSize({ width: size.width, height: size.height });
     return true;
   }
@@ -934,7 +851,9 @@ export class LaunchedRealInputProvider implements OwnedRealInputProvider {
   /** Apply network-mock rules to the owned page; false before navigate / after dispose. */
   async setMocks(_sessionUrl: string, rules: MockRule[]): Promise<boolean> {
     const page = this.#livePage();
-    if (page === undefined) return false;
+    if (page === undefined) {
+      return false;
+    }
     await installNetworkMocks(page, rules);
     return true;
   }
@@ -944,7 +863,9 @@ export class LaunchedRealInputProvider implements OwnedRealInputProvider {
     const browser = this.#browser;
     this.#browser = undefined;
     this.#page = undefined;
-    if (browser !== undefined) await browser.close();
+    if (browser !== undefined) {
+      await browser.close();
+    }
   }
 }
 
@@ -967,7 +888,9 @@ export function selectPage<T extends { url(): string }>(
   sessionUrl: string,
 ): T | undefined {
   const exact = pages.find((p) => p.url() === sessionUrl);
-  if (exact !== undefined) return exact;
+  if (exact !== undefined) {
+    return exact;
+  }
   const target = stripVolatile(sessionUrl);
   const loose = pages.filter((p) => stripVolatile(p.url()) === target);
   return 1 === loose.length ? loose[0] : undefined;

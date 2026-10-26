@@ -5,6 +5,8 @@ import { hitTestOccluder } from '@/dom/occlusion.js';
 import { nativeFrame } from '@/timers/native/native-timers.js';
 import { asSyntheticInput } from './synthetic/synthetic-input.js';
 import type { ActionTarget } from '@/dom/realm.js';
+import { ClickButton, clickButtonFromArgs } from '@reticlehq/core';
+import { type ModifierFlags, pressModifiers } from './actions-press.js';
 
 interface ClickGeometry {
   occluded: boolean;
@@ -60,6 +62,32 @@ function pointerEventFor(el: Element, type: string, init: PointerEventInit): Mou
 const BUTTON_HELD = 1;
 const BUTTON_RELEASED = 0;
 
+/** What a click carries besides its place: the keys held down and the button pressed. */
+export interface ClickInput {
+  modifiers: ModifierFlags;
+  button: ClickButton;
+}
+
+export const PLAIN_CLICK: ClickInput = {
+  modifiers: { metaKey: false, ctrlKey: false, shiftKey: false, altKey: false },
+  button: ClickButton.LEFT,
+};
+
+/** `MouseEvent.button` and the `buttons` bit for each button a click can use. */
+const BUTTON_CODES: Readonly<Record<ClickButton, { button: number; bit: number }>> = {
+  [ClickButton.LEFT]: { button: 0, bit: 1 },
+  [ClickButton.RIGHT]: { button: 2, bit: 2 },
+  [ClickButton.MIDDLE]: { button: 1, bit: 4 },
+};
+
+/** The modifiers and button a click asks for. Call `clickInputProblem` first: this assumes valid args. */
+export function clickInputOf(args: Record<string, unknown>): ClickInput {
+  return {
+    modifiers: pressModifiers(args),
+    button: clickButtonFromArgs(args) ?? ClickButton.LEFT,
+  };
+}
+
 /**
  * One pointer or mouse event at a point, with the button state a real pointer would report.
  *
@@ -76,6 +104,7 @@ function fireAt(
   buttons: number,
   related?: EventTarget | null,
   detail = 0,
+  input: ClickInput = PLAIN_CLICK,
 ): boolean {
   const init = {
     bubbles: !(type.endsWith('enter') || type.endsWith('leave')),
@@ -86,7 +115,8 @@ function fireAt(
     screenX: at.x,
     screenY: at.y,
     buttons,
-    button: 0,
+    button: BUTTON_CODES[input.button].button,
+    ...input.modifiers,
     ...(related !== undefined ? { relatedTarget: related } : {}),
   };
   return el.dispatchEvent(
@@ -106,6 +136,7 @@ export async function fireClickSequence(
   el: ActionTarget,
   hold?: { ms: number; sleep: (ms: number) => Promise<void>; now: () => number },
   detail?: number,
+  input: ClickInput = PLAIN_CLICK,
 ): Promise<{ prevented: boolean; heldMs: number }> {
   const doc = el.ownerDocument;
   const from: EventTarget = doc.activeElement ?? doc.body;
@@ -114,9 +145,17 @@ export async function fireClickSequence(
   // on nothing, and one path passed anyway (#1003). Drag already sent all of this.
   const at = centreOf(el);
   const d = detail ?? 0;
-  asSyntheticInput(() => fireAt(el, 'pointerdown', at, BUTTON_HELD, from, d));
-  asSyntheticInput(() => fireAt(el, 'mousedown', at, BUTTON_HELD, undefined, d));
-  if (el.tabIndex >= 0 && 'function' === typeof el.focus) el.focus();
+  const held = BUTTON_CODES[input.button].bit;
+  const isLeft = ClickButton.LEFT === input.button;
+  let notPrevented = true;
+  asSyntheticInput(() => fireAt(el, 'pointerdown', at, held, from, d, input));
+  asSyntheticInput(() => fireAt(el, 'mousedown', at, held, undefined, d, input));
+  if (ClickButton.RIGHT === input.button) {
+    notPrevented = asSyntheticInput(() => fireAt(el, 'contextmenu', at, held, undefined, d, input));
+  }
+  if (el.tabIndex >= 0 && 'function' === typeof el.focus) {
+    el.focus();
+  }
   // The gap that makes hold-to-confirm driveable. With down and up synchronous, a control whose
   // contract is "the button is down for N ms" cannot be expressed at all — it cancels its own
   // confirm on a mouseup arriving milliseconds later. `drag` splits the pair the same way.
@@ -130,13 +169,18 @@ export async function fireClickSequence(
     await hold.sleep(hold.ms);
     heldMs = hold.now() - startedAt;
   }
-  asSyntheticInput(() => fireAt(el, 'pointerup', at, BUTTON_RELEASED, from, d));
-  asSyntheticInput(() => fireAt(el, 'mouseup', at, BUTTON_RELEASED, undefined, d));
+  asSyntheticInput(() => fireAt(el, 'pointerup', at, BUTTON_RELEASED, from, d, input));
+  asSyntheticInput(() => fireAt(el, 'mouseup', at, BUTTON_RELEASED, undefined, d, input));
   // Marked as Reticle's own so the annotator's capture-phase listener lets it through. Without it,
   // the click is swallowed whole in annotate mode while still reporting `dispatched: true`.
-  const notPrevented = asSyntheticInput(() =>
-    fireAt(el, 'click', at, BUTTON_RELEASED, undefined, d),
+  // A browser sends `click` for the primary button only; any other button gets `auxclick`.
+  const clicked = asSyntheticInput(() =>
+    fireAt(el, isLeft ? 'click' : 'auxclick', at, BUTTON_RELEASED, undefined, d, input),
   );
+  // A right click reports its `contextmenu`, the event an app cancels to show its own menu.
+  if (ClickButton.RIGHT !== input.button) {
+    notPrevented = clicked;
+  }
   return { prevented: !notPrevented, heldMs };
 }
 
@@ -148,7 +192,9 @@ function isMeasurable(rect: DOMRect): boolean {
 /** The center of `rect` falls outside the visible viewport. */
 export function isOffViewport(el: Element, rect: DOMRect): boolean {
   const win = el.ownerDocument.defaultView;
-  if (null === win) return false;
+  if (null === win) {
+    return false;
+  }
   const cx = rect.left + rect.width / 2;
   const cy = rect.top + rect.height / 2;
   return cx < 0 || cy < 0 || cx > win.innerWidth || cy > win.innerHeight;
@@ -168,14 +214,18 @@ function hitTest(
 /** An element in words a person can find it by: its test id, else role and name, else its tag. */
 function nameOf(el: Element): string {
   const testid = readTestId(el);
-  if (testid !== null && testid.length > 0) return `[data-testid="${testid}"]`;
+  if (testid !== null && testid.length > 0) {
+    return `[data-testid="${testid}"]`;
+  }
   const name = getAccessibleName(el).trim();
   return name.length > 0 ? `${getRole(el)} "${name.slice(0, 40)}"` : el.tagName.toLowerCase();
 }
 
 /** Laid out (the page has layout) with a box of no area: a pointer has nowhere to land. */
 function hasNoSize(el: ActionTarget): boolean {
-  if (typeof el.getClientRects !== 'function') return false;
+  if (typeof el.getClientRects !== 'function') {
+    return false;
+  }
   const rects = Array.from(el.getClientRects());
   return rects.length > 0 && rects.every((r) => 0 === r.width || 0 === r.height);
 }
@@ -186,9 +236,13 @@ function hasNoSize(el: ActionTarget): boolean {
  * learns when the target is off-screen or visually blocked instead of getting a false "it worked".
  */
 export function clickGeometry(el: ActionTarget): ClickGeometry {
-  if (typeof el.getBoundingClientRect !== 'function') return NO_GEOMETRY;
+  if (typeof el.getBoundingClientRect !== 'function') {
+    return NO_GEOMETRY;
+  }
   let rect = el.getBoundingClientRect();
-  if (!isMeasurable(rect)) return hasNoSize(el) ? { ...NO_GEOMETRY, noSize: true } : NO_GEOMETRY;
+  if (!isMeasurable(rect)) {
+    return hasNoSize(el) ? { ...NO_GEOMETRY, noSize: true } : NO_GEOMETRY;
+  }
   let scrolledIntoView = false;
   if (isOffViewport(el, rect) && 'function' === typeof el.scrollIntoView) {
     el.scrollIntoView({ block: 'center', inline: 'center' });
@@ -223,14 +277,18 @@ export function firePointerNonBubbling(
 }
 
 function makeDataTransfer(data: unknown): DataTransfer | null {
-  if (typeof DataTransfer !== 'function') return null;
+  if (typeof DataTransfer !== 'function') {
+    return null;
+  }
   const dt = new DataTransfer();
   // data: { mime, value } or [{ mime, value }, …]
   const entries = Array.isArray(data) ? data : data !== undefined ? [data] : [];
   for (const entry of entries) {
     if ('object' === typeof entry && entry !== null) {
       const e = entry as { mime?: unknown; value?: unknown };
-      if ('string' === typeof e.mime && 'string' === typeof e.value) dt.setData(e.mime, e.value);
+      if ('string' === typeof e.mime && 'string' === typeof e.value) {
+        dt.setData(e.mime, e.value);
+      }
     }
   }
   return dt;
@@ -332,7 +390,9 @@ export async function dragElement(
   if ('function' === typeof DragEvent) {
     const dataTransfer = makeDataTransfer(data);
     const init: DragEventInit = { bubbles: true, cancelable: true };
-    if (dataTransfer !== null) init.dataTransfer = dataTransfer;
+    if (dataTransfer !== null) {
+      init.dataTransfer = dataTransfer;
+    }
     source.dispatchEvent(new DragEvent('dragstart', init));
     await nativeFrame();
     dest.dispatchEvent(new DragEvent('dragenter', init));
@@ -367,7 +427,9 @@ export async function fireTapSequence(
   const touches = touchListFor(el);
   firePointerTouch(el, 'pointerdown');
   asSyntheticInput(() => el.dispatchEvent(makeTouchEvent('touchstart', touches)));
-  if (el.tabIndex >= 0 && 'function' === typeof el.focus) el.focus();
+  if (el.tabIndex >= 0 && 'function' === typeof el.focus) {
+    el.focus();
+  }
   let heldMs = 0;
   if (hold !== undefined && hold.ms > 0) {
     const started = hold.now();
@@ -407,7 +469,9 @@ function firePointerTouch(el: Element, type: string): void {
  * behaves the same, and one that does not would have thrown on a real touchend too.
  */
 function touchListFor(el: ActionTarget): Touch[] {
-  if ('function' !== typeof Touch || 'function' !== typeof el.getBoundingClientRect) return [];
+  if ('function' !== typeof Touch || 'function' !== typeof el.getBoundingClientRect) {
+    return [];
+  }
   const rect = el.getBoundingClientRect();
   try {
     return [
@@ -453,8 +517,12 @@ const CLOSED_STATE = 'closed';
  */
 export function assertNotLeaving(el: Element): void {
   for (let up = el.parentElement; up !== null; up = up.parentElement) {
-    if (CLOSED_STATE !== up.getAttribute('data-state')) continue;
-    if (!POPUP_ROLES.has(up.getAttribute('role') ?? '')) continue;
+    if (CLOSED_STATE !== up.getAttribute('data-state')) {
+      continue;
+    }
+    if (!POPUP_ROLES.has(up.getAttribute('role') ?? '')) {
+      continue;
+    }
     throw new Error(
       `'${up.getAttribute('role') ?? 'popup'}' holding this element is closing (data-state="closed"), ` +
         'so a person could not click it: look again once it has gone and act on what is open',

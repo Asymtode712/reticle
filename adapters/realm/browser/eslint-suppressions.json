@@ -1,8 +1,5 @@
 {
   "src/actions/actions-dom.ts": {
-    "curly": {
-      "count": 13
-    },
     "no-nested-ternary": {
       "count": 1
     }

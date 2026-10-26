@@ -31,6 +31,7 @@ export * from './wire/constants/response-body-reason.js'; // why a NET_REQUEST c
 export * from './identity/source-constants.js'; // DATA_RETICLE_SOURCE_ATTR, RETICLE_ROOT_GLOBAL
 export * from './identity/testid-attribute.js'; // DEFAULT_TESTID_ATTR, ALTERNATIVE_TESTID_ATTRS
 export * from './wire/event-classification.js'; // CHURN_TYPES — shared eviction priority for buffer/queue
+export * from './wire/click-input.js'; // which button and modifiers a click may carry
 export * from './wire/global-press.js'; // which press is a document key (Escape / Tab / a shortcut)
 export * from './wire/hold.js'; // clampHoldMs — the bounded hold both input paths honour
 export * from './verdict/verified-constants.js'; // Verified — the one field an agent gates on
