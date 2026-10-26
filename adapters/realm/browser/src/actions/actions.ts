@@ -2,6 +2,7 @@ import {
   ActionType,
   ActionWarning,
   clampHoldMs,
+  clickInputProblem,
   DANGEROUS_ACTION_CONFIRM_ARG,
   ElementState,
   NATIVE_INPUT_ARG,
@@ -248,6 +249,7 @@ import {
   dragElement,
   mouseEventFor,
   assertNotLeaving,
+  clickInputOf,
 } from './actions-dom.js';
 import { scrollFrom } from './scroll.js';
 import { clickHitsNoControl } from './click-target.js';
@@ -311,6 +313,8 @@ async function dispatchFor(
     return await fireClickSequence(
       el,
       0 === hold ? undefined : { ms: hold, sleep, now: () => Date.now() },
+      undefined,
+      clickInputOf(args),
     );
   }
   if (ActionType.TAP === action) {
@@ -344,14 +348,21 @@ async function dispatchOther(
   args: Record<string, unknown>,
 ): Promise<boolean> {
   switch (action) {
-    case ActionType.DBLCLICK:
-      await fireClickSequence(el, undefined, 1);
-      await fireClickSequence(el, undefined, 2);
+    case ActionType.DBLCLICK: {
+      const input = clickInputOf(args);
+      await fireClickSequence(el, undefined, 1, input);
+      await fireClickSequence(el, undefined, 2, input);
       return !asSyntheticInput(() =>
         el.dispatchEvent(
-          mouseEventFor(el, 'dblclick', { bubbles: true, cancelable: true, detail: 2 }),
+          mouseEventFor(el, 'dblclick', {
+            bubbles: true,
+            cancelable: true,
+            detail: 2,
+            ...input.modifiers,
+          }),
         ),
       );
+    }
     case ActionType.HOVER: {
       const doc = el.ownerDocument;
       // Best-effort "previous" node for relatedTarget so React's enter/leave synthesis has a "from".
@@ -667,6 +678,12 @@ export async function executeAction(
   args: Record<string, unknown> = {},
 ): Promise<ActionResult> {
   const named = 0 < ref.length;
+  if (ActionType.CLICK === action || ActionType.DBLCLICK === action) {
+    const problem = clickInputProblem(action, args);
+    if (problem !== undefined) {
+      throw new Error(`cannot ${action}: ${problem}`);
+    }
+  }
   const el = isReflessDocumentPress(ref, action, args) ? focusedOrDocument() : requireElement(ref);
   // A document-key press is not aimed at the element we dispatch on. The destructive-action
   // guard classifies the ELEMENT, and inventing a target from body/focus would be the lie this

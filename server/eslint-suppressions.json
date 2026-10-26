@@ -2651,9 +2651,6 @@
     }
   },
   "src/portal/input/real-input.ts": {
-    "curly": {
-      "count": 36
-    },
     "no-nested-ternary": {
       "count": 2
     }
@@ -2666,11 +2663,6 @@
   "src/portal/input/storage-fixture.ts": {
     "curly": {
       "count": 5
-    }
-  },
-  "src/portal/input/tools.real-input.test.ts": {
-    "curly": {
-      "count": 6
     }
   },
   "src/portal/input/viewport-tools.test.ts": {
@@ -3981,11 +3973,6 @@
   "src/surface/tools/read/snapshot-unmounted-note.ts": {
     "curly": {
       "count": 7
-    }
-  },
-  "src/surface/tools/real-input-attempt.ts": {
-    "curly": {
-      "count": 28
     }
   },
   "src/surface/tools/reconcile-tools.test.ts": {

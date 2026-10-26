@@ -132,7 +132,7 @@ const OVER_THE_LINE: Readonly<Record<string, number>> = {
   // 19 with `next-step.ts`: a coded refusal's `next` steps and the connect command, which the error
   // envelope carries to the agent. It needs `ReticleTool`, and `wire/constants` may not reach up
   // into `wire` (the directory-reach guard refused it there).
-  'core/src/wire': 19,
+  'core/src/wire': 20,
   // 16 since `snapshot-tree.ts`. The snapshot tree is a format the BROWSER writes and several
   // things on the Node side read back, and its parser was living beside the MCP tool handlers — so
   // every other reader imported from the tool surface to parse a string the tool surface does not
@@ -311,7 +311,7 @@ const OVER_THE_LINE: Readonly<Record<string, number>> = {
   // first-run tour over a page nobody is looking at -- a rule split across two packages is worth
   // one file that names it.
   // +1: js-coverage.ts, the browser engine's code coverage beside the other driven-page capabilities.
-  'server/src/portal/input': 12,
+  'server/src/portal/input': 14,
   // 11 with `pool-lease.ts`: the lease types and the pool's limits, split out of browser-pool.ts at
   // the 1000-line cap (#1705).
   'server/src/portal/pool': 11,
