@@ -1,6 +1,6 @@
 {
   "name": "@reticlehq/server",
-  "version": "3.8.0",
+  "version": "3.8.1",
   "mcpName": "io.github.reticlehq/reticle",
   "description": "Reticle CLI, bridge and MCP server: a coding agent drives your running web app from the inside and gets a verdict with evidence, for change verification, access control, accessibility, performance and SEO checks.",
   "type": "module",
@@ -74,7 +74,7 @@
     "cli"
   ],
   "reticle": {
-    "changelog": "Reticle works in git worktrees: each agent reaches only the tabs its own worktree serves, and each run names its branch. reticle init now installs a prompt hook for the agents it finds: each prompt is kept, redacted, in .reticle/, and a linked project sends it with its runs unless \"shareRequests\": false. Background sync sends a linked project while you are signed in, or with RETICLE_API_KEY in CI. See MIGRATION.md (3.7 to 3.8).",
+    "changelog": "On Windows, the daemon now keeps running when the agent process that started it ends. A collapsed Next.js \"1 Issue\" badge no longer turns every check into unknown. Reticle moves to zod 4 for a high-severity memory advisory. reticle_lease can omit url and lease the project's own dev server. reticle doctor checks that the daemon answers, and streamed SSE response bodies can be captured. Update the SDK in your app as well as the CLI.",
     "breakingChanges": []
   },
   "publishConfig": {
