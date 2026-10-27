@@ -103,13 +103,20 @@ interface NextActionFacts {
    * project's own runner (see `initCommandIn`). Absent means the generic npx spelling.
    */
   init?: string;
+  /**
+   * Several direct child folders are apps with a dev script, and this folder has no package.json.
+   * Absent or short means there is no choice to hand the agent. See `childDevApps`.
+   */
+  childApps?: readonly string[];
 }
 
 /** The port a tombstone URL names, when it names one — anything unparseable names no port. */
 export function portOfUrl(url: string): number | undefined {
   try {
     const raw = new URL(url).port;
-    if ('' === raw) return undefined;
+    if ('' === raw) {
+      return undefined;
+    }
     const port = Number(raw);
     return Number.isSafeInteger(port) && port > 0 ? port : undefined;
   } catch {
@@ -142,15 +149,21 @@ export function departedPortGone(facts: {
  * for a url that does not parse, or one with no port to name (a desktop webview's opaque origin).
  */
 function reopenableUrl(raw: string | undefined): { url: string; port: number } | undefined {
-  if (raw === undefined) return undefined;
+  if (raw === undefined) {
+    return undefined;
+  }
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
     return undefined;
   }
-  if ('http:' !== url.protocol && 'https:' !== url.protocol) return undefined;
-  for (const param of Object.values(RETICLE_URL_PARAM)) url.searchParams.delete(param);
+  if ('http:' !== url.protocol && 'https:' !== url.protocol) {
+    return undefined;
+  }
+  for (const param of Object.values(RETICLE_URL_PARAM)) {
+    url.searchParams.delete(param);
+  }
   const port = '' === url.port ? ('https:' === url.protocol ? 443 : 80) : Number(url.port);
   return { url: url.toString(), port };
 }
@@ -381,6 +394,19 @@ export function nextActionFor(facts: NextActionFacts): NoSessionNextAction {
       ? "nothing answers on the port this project's app was last on, so the app is probably not running — "
       : notThisProject(facts.otherListeners);
     if (dev === undefined) {
+      const childApps = facts.childApps ?? [];
+      if (1 < childApps.length) {
+        return {
+          action: NoSessionAction.START_DEV_SERVER,
+          reason:
+            notRunning +
+            `but this folder has no package.json, and ${childApps.length} child folders are apps ` +
+            `with a dev script: ${childApps.join(', ')}. Reticle cannot tell which one you mean, so ` +
+            'there is no command to hand you. Pick one, then run Reticle from that folder or ask ' +
+            'the human which app to start.' +
+            stoppedNote,
+        };
+      }
       if (facts.exists !== undefined && !facts.exists('package.json')) {
         const ecosystem = detectNonJsEcosystem(facts.exists);
         if (ecosystem !== undefined) {

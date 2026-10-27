@@ -49,6 +49,21 @@ describe('nextActionFor', () => {
     expect(next.reason).toContain('no dev script');
   });
 
+  it('nothing listening and several child apps: chooses none and names them all', () => {
+    const next = nextActionFor({
+      everConnected: false,
+      initialized: true,
+      listening: [],
+      dev: undefined,
+      childApps: ['MagicBook', 'web'],
+    });
+    expect(next.action).toBe(NoSessionAction.START_DEV_SERVER);
+    expect(next.command).toBeUndefined();
+    expect(next.reason).toContain('MagicBook');
+    expect(next.reason).toContain('web');
+    expect(next.reason).not.toContain('no dev script');
+  });
+
   it('nothing listening and Flutter project: names Flutter and explains canvas rendering instead of no dev script', () => {
     const next = nextActionFor({
       everConnected: false,
