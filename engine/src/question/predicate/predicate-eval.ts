@@ -39,7 +39,9 @@ import { keyFragmentOnly } from './body-key-fragment.js';
 import { evalExactCount } from '@/exact-count.js';
 import {
   PRE_ATTACH_CAVEAT,
+  mediaLoadReason,
   nativeDownloadReason,
+  targetsMediaLoad,
   targetsNativeDownload,
   targetsUnobservedChannel,
   unobservedChannelReason,
@@ -145,17 +147,19 @@ function nativeDownloadMiss(
   events: ReticleEvent[],
   p: Extract<Predicate, { kind: typeof PredicateKind.NET }>,
 ): EvalResult | undefined {
-  if (!targetsNativeDownload(p.urlContains)) {
+  const media = targetsMediaLoad(p.urlContains);
+  if (!media && !targetsNativeDownload(p.urlContains)) {
     return undefined;
   }
-  const reason = nativeDownloadReason(describeNetFilter(p));
+  const filter = describeNetFilter(p);
+  const reason = media ? mediaLoadReason(filter) : nativeDownloadReason(filter);
   return {
     pass: false,
     failureReason: reason,
     inconclusive: reason,
     observed: observedNetCalls(events, p.urlContains),
-    expected: `a fetch or XHR matching ${describeNetFilter(p)}`,
-    assertion: 'net.native-download',
+    expected: `a fetch or XHR matching ${filter}`,
+    assertion: media ? 'net.media-load' : 'net.native-download',
   };
 }
 

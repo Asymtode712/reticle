@@ -82,6 +82,31 @@ const NATIVE_DOWNLOAD_SUFFIXES: readonly string[] = [
 ];
 
 /**
+ * File suffixes a media element (`<video>`, `<audio>`, `<track>`) loads.
+ *
+ * Unlike DOCUMENT_ONLY_SUFFIXES this is not gated on a live resource-timing observer: Chromium does
+ * not report media element loads as `resource` entries, so a page that plays the file leaves no
+ * record however live the observer is. A miss over one of these says nothing about the file.
+ */
+const MEDIA_LOAD_SUFFIXES: readonly string[] = [
+  '.mp4',
+  '.m4v',
+  '.webm',
+  '.mov',
+  '.ogv',
+  '.m3u8',
+  '.mp3',
+  '.m4a',
+  '.ogg',
+  '.oga',
+  '.wav',
+  '.aac',
+  '.flac',
+  '.opus',
+  '.vtt',
+];
+
+/**
  * Does this filter target a class of request the observer cannot see?
  *
  * Read off `urlContains` only, and only when the pattern ENDS in one of the suffixes — a filter of
@@ -107,6 +132,24 @@ export function targetsUnobservedChannel(url: string | undefined): boolean {
 export function targetsNativeDownload(url: string | undefined): boolean {
   if (undefined === url) return false;
   return NATIVE_DOWNLOAD_SUFFIXES.some((suffix) => filterPath(url).endsWith(suffix));
+}
+
+export function targetsMediaLoad(url: string | undefined): boolean {
+  if (undefined === url) {
+    return false;
+  }
+  return MEDIA_LOAD_SUFFIXES.some((suffix) => filterPath(url).endsWith(suffix));
+}
+
+/** `filter` is the net clause as applied — `describeNetFilter` of it. */
+export function mediaLoadReason(filter: string): string {
+  return (
+    `no fetch or XHR matched ${filter}. A media element (<video>, <audio>, <track>) loads its ` +
+    `source itself: the load goes through neither fetch nor XMLHttpRequest, and the browser does ` +
+    `not report it as a resource timing entry, so media element loads are not observed and an ` +
+    `empty net window is not evidence the file failed to load. Assert something that proves ` +
+    `playback instead, for example an element check on the <video> or <audio>`
+  );
 }
 
 /** `filter` is the net clause as applied — `describeNetFilter` of it. */
