@@ -277,11 +277,12 @@ describe('initCommandIn', () => {
  * lists the child, so it was never found and the agent was told the project has no dev script.
  */
 describe('a folder with no package.json and child apps', () => {
+  // The code lists `DIR` as given. On Windows, `join` turns `/app` into `\\app`, the form of `ROOT`.
   const ROOT = join(DIR, '.');
   const listing =
     (entries: Record<string, string[]>): ((path: string) => readonly string[]) =>
     (path) =>
-      entries[path] ?? [];
+      entries[join(path)] ?? [];
   const app = (script = 'dev'): string => JSON.stringify({ scripts: { [script]: 'vite' } });
 
   it('finds the one child app, its command and its directory', () => {
