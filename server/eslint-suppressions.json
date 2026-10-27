@@ -2754,9 +2754,6 @@
     }
   },
   "src/portal/session/dev-server/dev-command.ts": {
-    "curly": {
-      "count": 8
-    },
     "no-nested-ternary": {
       "count": 1
     }
@@ -2880,9 +2877,6 @@
     }
   },
   "src/portal/session/no-session-next-action.ts": {
-    "curly": {
-      "count": 4
-    },
     "no-nested-ternary": {
       "count": 4
     }

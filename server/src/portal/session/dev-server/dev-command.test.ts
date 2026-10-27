@@ -9,7 +9,12 @@
 
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
-import { detectDevCommand, detectDevCommandInProject, initCommandIn } from './dev-command.js';
+import {
+  childDevApps,
+  detectDevCommand,
+  detectDevCommandInProject,
+  initCommandIn,
+} from './dev-command.js';
 
 /** A reader over an in-memory tree — the real one reads the disk. */
 function reader(files: Record<string, string>): (path: string) => string | undefined {
@@ -263,6 +268,74 @@ describe('initCommandIn', () => {
     const listing = (path: string): readonly string[] => (path === ROOT ? ['web'] : []);
     expect(initCommandIn(DIR, reader(files), listing)).toBe(
       'cd web && pnpm dlx @reticlehq/server init',
+    );
+  });
+});
+
+/**
+ * A task folder holds the app one level down and has no package.json of its own: no workspace file
+ * lists the child, so it was never found and the agent was told the project has no dev script.
+ */
+describe('a folder with no package.json and child apps', () => {
+  const ROOT = join(DIR, '.');
+  const listing =
+    (entries: Record<string, string[]>): ((path: string) => readonly string[]) =>
+    (path) =>
+      entries[path] ?? [];
+  const app = (script = 'dev'): string => JSON.stringify({ scripts: { [script]: 'vite' } });
+
+  it('finds the one child app, its command and its directory', () => {
+    const files = { [at('MagicBook/package.json')]: app() };
+    expect(
+      detectDevCommandInProject(DIR, reader(files), listing({ [ROOT]: ['MagicBook'] })),
+    ).toEqual({ command: 'npm run dev', script: 'dev', directory: 'MagicBook' });
+  });
+
+  it('uses the child own lockfile for the package manager', () => {
+    const files = {
+      [at('MagicBook/package.json')]: app(),
+      [at('MagicBook/pnpm-lock.yaml')]: '',
+    };
+    expect(
+      detectDevCommandInProject(DIR, reader(files), listing({ [ROOT]: ['MagicBook'] }))?.command,
+    ).toBe('pnpm run dev');
+  });
+
+  it('chooses none when two children are apps, and names both', () => {
+    const files = {
+      [at('web/package.json')]: app(),
+      [at('MagicBook/package.json')]: app(),
+    };
+    const dirs = listing({ [ROOT]: ['web', 'MagicBook'] });
+    expect(detectDevCommandInProject(DIR, reader(files), dirs)).toBeUndefined();
+    expect(childDevApps(DIR, reader(files), dirs)).toEqual(['MagicBook', 'web']);
+  });
+
+  it('skips node_modules, hidden folders and folders that are not apps', () => {
+    const files = {
+      [at('node_modules/package.json')]: app(),
+      [at('.cache/package.json')]: app(),
+      [at('lib/package.json')]: JSON.stringify({ scripts: { build: 'tsc' } }),
+      [at('docs/readme.md')]: 'no package.json here',
+      [at('MagicBook/package.json')]: app(),
+    };
+    const dirs = listing({ [ROOT]: ['node_modules', '.cache', 'lib', 'docs', 'MagicBook'] });
+    expect(childDevApps(DIR, reader(files), dirs)).toEqual(['MagicBook']);
+    expect(detectDevCommandInProject(DIR, reader(files), dirs)?.directory).toBe('MagicBook');
+  });
+
+  it('childDevApps ignores a folder that has its own package.json', () => {
+    const files = {
+      [PKG]: JSON.stringify({ name: 'repo' }),
+      [at('MagicBook/package.json')]: app(),
+    };
+    expect(childDevApps(DIR, reader(files), listing({ [ROOT]: ['MagicBook'] }))).toEqual([]);
+  });
+
+  it('points init at the child app', () => {
+    const files = { [at('MagicBook/package.json')]: app() };
+    expect(initCommandIn(DIR, reader(files), listing({ [ROOT]: ['MagicBook'] }))).toBe(
+      'cd MagicBook && npx @reticlehq/server init',
     );
   });
 });

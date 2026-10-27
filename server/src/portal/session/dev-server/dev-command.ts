@@ -53,6 +53,7 @@ const INIT_VERB = 'init';
 
 const DEFAULT_PACKAGE_MANAGER = 'npm';
 const PACKAGE_JSON = 'package.json';
+const PNPM_WORKSPACE = 'pnpm-workspace.yaml';
 
 /** `--port 4311` / `--port=4311`, the flag every dev server in this list accepts. */
 const PORT_FLAG = /--port[= ]\s*(\d+)/;
@@ -78,14 +79,18 @@ function readTextFile(path: string): string | undefined {
 function pinnedPort(script: string): number | undefined {
   const match = PORT_FLAG.exec(script) ?? PORT_SHORT_FLAG.exec(script) ?? PORT_ENV.exec(script);
   const digits = match?.[1];
-  if (digits === undefined) return undefined;
+  if (digits === undefined) {
+    return undefined;
+  }
   const port = Number.parseInt(digits, 10);
   return Number.isSafeInteger(port) ? port : undefined;
 }
 
 /** The parsed package.json, or undefined for anything unreadable/unparseable. */
 function readManifest(raw: string | undefined): unknown {
-  if (raw === undefined) return undefined;
+  if (raw === undefined) {
+    return undefined;
+  }
   try {
     return JSON.parse(raw);
   } catch {
@@ -95,9 +100,13 @@ function readManifest(raw: string | undefined): unknown {
 
 /** The scripts block of a parsed package.json, or an empty one. */
 function scriptsOf(manifest: unknown): Record<string, unknown> {
-  if (null === manifest || 'object' !== typeof manifest) return {};
+  if (null === manifest || 'object' !== typeof manifest) {
+    return {};
+  }
   const scripts = (manifest as { scripts?: unknown }).scripts;
-  if (null === scripts || 'object' !== typeof scripts) return {};
+  if (null === scripts || 'object' !== typeof scripts) {
+    return {};
+  }
   return scripts as Record<string, unknown>;
 }
 
@@ -122,7 +131,9 @@ function devCommandFor(
   // spawns are the same.
   const desktop = desktopLaunch(manifest);
   if (desktop !== undefined) {
-    if ('command' in desktop) return { command: desktop.command };
+    if ('command' in desktop) {
+      return { command: desktop.command };
+    }
     const command = `${manager} run ${desktop.script}`;
     return {
       command: 0 < desktop.args.length ? `${command} ${desktop.args}` : command,
@@ -131,7 +142,9 @@ function devCommandFor(
   }
   for (const script of DEV_SCRIPTS) {
     const body = scripts[script];
-    if ('string' !== typeof body || 0 === body.trim().length) continue;
+    if ('string' !== typeof body || 0 === body.trim().length) {
+      continue;
+    }
     const port = pinnedPort(body);
     return {
       command: `${manager} run ${script}`,
@@ -140,6 +153,34 @@ function devCommandFor(
     };
   }
   return undefined;
+}
+
+/** Folders never read as an app: dependencies, and anything hidden (`.git`, `.cache`). */
+const NODE_MODULES = 'node_modules';
+const HIDDEN_PREFIX = '.';
+
+/**
+ * The direct child folders of `directory` that are apps with a dev command, sorted by name.
+ *
+ * Only for a folder with no package.json of its own. A task folder holds the app one level down, and
+ * no workspace file lists it, so `workspacePackageDirs` never finds it. Folders that are not apps
+ * (no package.json, or no dev script), `node_modules` and hidden folders are skipped.
+ */
+export function childDevApps(
+  directory: string,
+  read: (path: string) => string | undefined = readTextFile,
+  listDirs: (path: string) => readonly string[] = readDirNames,
+): readonly string[] {
+  if (read(join(directory, PACKAGE_JSON)) !== undefined) {
+    return [];
+  }
+  return listDirs(directory)
+    .filter((name) => NODE_MODULES !== name && !name.startsWith(HIDDEN_PREFIX))
+    .filter((name) => {
+      const child = join(directory, name);
+      return devCommandFor(child, packageManager(child, read), read) !== undefined;
+    })
+    .sort();
 }
 
 /** Directory names under `path`, or none when it cannot be read. */
@@ -182,14 +223,37 @@ export function detectDevCommandInProject(
 ): DevCommand | undefined {
   const manager = packageManager(directory, read);
   const here = devCommandFor(directory, manager, read);
-  if (here !== undefined) return here;
+  if (here !== undefined) {
+    return here;
+  }
+  // No package.json and no pnpm workspace file: a task folder, with the app one level down. With two
+  // apps there, choosing the first would start the wrong one; the caller names them through
+  // `childDevApps`. With none, the workspace search below still looks a level deeper.
+  if (
+    read(join(directory, PACKAGE_JSON)) === undefined &&
+    read(join(directory, PNPM_WORKSPACE)) === undefined
+  ) {
+    const [only, ...others] = childDevApps(directory, read, listDirs);
+    if (0 < others.length) {
+      return undefined;
+    }
+    if (only !== undefined) {
+      const child = join(directory, only);
+      const found = devCommandFor(child, packageManager(child, read), read);
+      if (found !== undefined) {
+        return { ...found, directory: only };
+      }
+    }
+  }
   const packages = workspacePackageDirs({
     readFile: (path) => read(join(directory, path)) ?? null,
     listDirs: (path) => listDirs(join(directory, path)),
   });
   for (const sub of packages) {
     const found = devCommandFor(join(directory, sub), manager, read);
-    if (found !== undefined) return { ...found, directory: sub };
+    if (found !== undefined) {
+      return { ...found, directory: sub };
+    }
   }
   return undefined;
 }
