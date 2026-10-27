@@ -184,6 +184,85 @@ export function isRenderedOutsideAriaHidden(el: Element): boolean {
   return true;
 }
 
+const BACKFACE_VISIBILITY_HIDDEN = 'hidden';
+
+/**
+ * The resolved transform a browser reports for one element. `computedStyle.transform` is already a
+ * matrix; an element with none gets the identity. `null` means the value could not be parsed, and
+ * every facing above it becomes unknowable.
+ */
+function localTransform(style: CSSStyleDeclaration | null): DOMMatrix | null {
+  if ('undefined' === typeof DOMMatrix) {
+    return null;
+  }
+  try {
+    const transform = style?.transform;
+    return undefined === transform || '' === transform || 'none' === transform
+      ? new DOMMatrix()
+      : new DOMMatrix(transform);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the accumulated transform turns the element's front face away from the viewer. The local
+ * +z normal maps to the matrix's third column, so a negative zz component is the back face. At
+ * exactly zero the face is edge-on; only `< 0` keeps a face that is still edge-on from reading as
+ * hidden on a floating-point rounding error.
+ */
+function backFaceTowardViewer(matrix: DOMMatrix): boolean {
+  return Number.isFinite(matrix.m33) && 0 > matrix.m33;
+}
+
+/**
+ * Whether the element, or a face it sits on, turns its back to the viewer while declaring
+ * `backface-visibility: hidden` (#1940). A flip card rotates a container, so the facing is the
+ * transform chain from the element up to the root, not the element's own `transform`. The check
+ * runs per ancestor because the declaration can sit on a face while the control inside it has no
+ * transform of its own.
+ */
+function backfaceHidden(el: Element, memo: Map<Element, VisibilityInfo>): boolean {
+  const chain: Element[] = [];
+  let declares = false;
+  for (
+    let current: Element | null = el;
+    null !== current;
+    current = parentAcrossShadowBoundary(current)
+  ) {
+    const style = ownVisibilityInfo(current, memo).style;
+    if (BACKFACE_VISIBILITY_HIDDEN === style?.backfaceVisibility) {
+      declares = true;
+    }
+    chain.push(current);
+  }
+  if (!declares) {
+    return false;
+  }
+  let composed: DOMMatrix | null = null;
+  for (let index = chain.length - 1; index >= 0; index -= 1) {
+    const current = chain[index];
+    if (undefined === current) {
+      return false;
+    }
+    const style = ownVisibilityInfo(current, memo).style;
+    const local = localTransform(style);
+    if (null === local) {
+      // Fail open: a false `hidden` is the bug this check exists to fix, and a transform the
+      // browser's own matrix type cannot read is not a reason to hide a control.
+      return false;
+    }
+    composed = null === composed ? local : composed.multiply(local);
+    if (
+      BACKFACE_VISIBILITY_HIDDEN === style?.backfaceVisibility &&
+      backFaceTowardViewer(composed)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const CLIPPING_OVERFLOW = new Set(['hidden', 'clip']);
 /** A box a person can scroll: what it holds past its edge is below the fold, not hidden. */
 const SCROLLING_OVERFLOW = new Set(['auto', 'scroll']);
@@ -470,7 +549,10 @@ export function isVisible(el: Element, memo?: Map<Element, boolean>): boolean {
     return cached;
   }
   const info = visibilityInfoMemo(memo);
-  const result = visibleBounds(el, info, undefined, true) !== null && !collapsed(el, info);
+  const result =
+    visibleBounds(el, info, undefined, true) !== null &&
+    !collapsed(el, info) &&
+    !backfaceHidden(el, info);
   if (memo !== undefined) {
     memo.set(el, result);
   }
