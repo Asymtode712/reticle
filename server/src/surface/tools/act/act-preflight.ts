@@ -11,6 +11,7 @@
  * outcome than "unknown".
  */
 import { PredicateSchema } from '@reticlehq/engine/question/predicate/predicate-schema.js';
+import { parsePredicate } from '@reticlehq/engine/question/predicate/predicate-parse.js';
 import { SESSION_REF, isGlobalPressCall, unissuedRefRefusal } from '@reticlehq/core';
 import { isDocumentGoneError } from '@/portal/session/facts/session-replaced.js';
 import { SessionReplacedError } from '@/portal/session/page-commands/pending-commands.js';
@@ -83,7 +84,9 @@ const STEP_STRUCTURE_KEYS: ReadonlySet<string> = new Set([
 export function sequenceStepArgs(step: Record<string, unknown>): Record<string, unknown> {
   const flat: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(step)) {
-    if (!STEP_STRUCTURE_KEYS.has(key)) flat[key] = value;
+    if (!STEP_STRUCTURE_KEYS.has(key)) {
+      flat[key] = value;
+    }
   }
   const nested = step['args'];
   if ('string' === typeof nested) {
@@ -103,6 +106,22 @@ export function sequenceStepArgs(step: Record<string, unknown>): Record<string, 
     return { ...flat, ...(parsed as Record<string, unknown>) };
   }
   return { ...flat, ...(null !== nested && 'object' === typeof nested ? nested : {}) };
+}
+
+/**
+ * Why `parsePredicate` refuses this `expect`, as the sentence `reticle_assert` gives.
+ *
+ * Called only after `PredicateSchema` has refused the value, so the parse throws. The schema stays
+ * the test for refusal: `parsePredicate` also refuses a value that the schema accepts, and this
+ * check must not refuse more than it did before.
+ */
+function expectParseIssue(value: unknown): string {
+  try {
+    parsePredicate(value);
+    return '';
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 export function assertSequenceSteps(steps: readonly unknown[]): void {
@@ -131,20 +150,16 @@ export function assertSequenceSteps(steps: readonly unknown[]): void {
      * declared; nothing told it the declaration was discarded, and that sentence invites it to add
      * the very thing it just wrote. Same false green as an unreadable key, through a key this tool
      * does read.
+     *
+     * The reason is the sentence `reticle_assert` gives for the same predicate: the field that failed
+     * and the fields that work. A fixed sentence with generic examples did not say that `css` is not a
+     * `query` field, so the caller had to guess again. That sentence also carries the schema's own
+     * words, such as the keys it saw when it could not tell the kind.
      */
-    const parsed =
-      step['expect'] === undefined ? undefined : PredicateSchema.safeParse(step['expect']);
-    if (parsed !== undefined && !parsed.success) {
-      // The schema's own words, such as the keys it saw when it could not tell the kind.
-      const said = parsed.error.issues
-        .filter((issue) => 'custom' === issue.code)
-        .map((issue) => ` ${issue.message}.`)
-        .join('');
+    if (step['expect'] !== undefined && !PredicateSchema.safeParse(step['expect']).success) {
       throw new Error(
-        `step ${String(i)} carries an \`expect\` this tool cannot parse.${said} ` +
-          'A consequence is a predicate object with a `kind` — e.g. { kind: "signal", name: ' +
-          '"order:placed" }, { kind: "element", by: "testid", value: "receipt" }, or ' +
-          '{ kind: "settled" } — the same shape reticle_act_and_wait takes as `until`. ' +
+        `step ${String(i)} carries an \`expect\` this tool cannot parse: ` +
+          `${expectParseIssue(step['expect'])} ` +
           'Refused rather than dropped, because a step whose declaration was discarded reports ' +
           'as a step that declared nothing. Nothing was acted on.',
       );
@@ -163,8 +178,12 @@ export function assertSequenceSteps(steps: readonly unknown[]): void {
       }
       return;
     }
-    if (step['target'] !== undefined) return;
-    if (isGlobalPressCall(step)) return;
+    if (step['target'] !== undefined) {
+      return;
+    }
+    if (isGlobalPressCall(step)) {
+      return;
+    }
     throw new Error(
       `step ${String(i)} has no \`ref\` or \`target\`. ` +
         'Sequence steps take `ref` (from reticle_query/reticle_snapshot) or `target` ' +
@@ -184,11 +203,15 @@ export function preflightAct(actArgs: Record<string, unknown>, until: unknown): 
   // the agent its trusted click had happened. See act-danger.
   assertNativeInputSupported(actArgs);
   const unevaluable = unevaluablePredicateReason(until);
-  if (unevaluable !== undefined) throw new Error(unevaluable);
+  if (unevaluable !== undefined) {
+    throw new Error(unevaluable);
+  }
   // A predicate that was already true when it was written answered `no-fault` / `already_true` —
   // verdict-shaped, and carrying no proof of anything the action did. See vacuousPredicateReason.
   const vacuous = vacuousPredicateReason(until);
-  if (vacuous !== undefined) throw new Error(vacuous);
+  if (vacuous !== undefined) {
+    throw new Error(vacuous);
+  }
 }
 
 /**
@@ -208,7 +231,9 @@ export async function dispatchAct<T>(send: () => Promise<T>): Promise<T | null> 
   try {
     return await send();
   } catch (error: unknown) {
-    if (error instanceof SessionReplacedError || isDocumentGoneError(error)) return null;
+    if (error instanceof SessionReplacedError || isDocumentGoneError(error)) {
+      return null;
+    }
     throw error;
   }
 }

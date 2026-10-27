@@ -3292,11 +3292,6 @@
       "count": 4
     }
   },
-  "src/surface/tools/act-sequence-steps.test.ts": {
-    "curly": {
-      "count": 1
-    }
-  },
   "src/surface/tools/act-sequence-target.test.ts": {
     "curly": {
       "count": 1
@@ -3351,11 +3346,6 @@
   "src/surface/tools/act/act-observation.ts": {
     "curly": {
       "count": 11
-    }
-  },
-  "src/surface/tools/act/act-preflight.ts": {
-    "curly": {
-      "count": 6
     }
   },
   "src/surface/tools/act/act-sequence-retry.ts": {

@@ -187,7 +187,9 @@ describe('reticle_act_sequence handler with string args (#1230)', () => {
       now: () => 0,
     };
     const tool = TOOLS.find((t) => t.name === ReticleTool.ACT_SEQUENCE);
-    if (tool === undefined) throw new Error('no reticle_act_sequence tool');
+    if (tool === undefined) {
+      throw new Error('no reticle_act_sequence tool');
+    }
     await tool.handler(deps as never, { steps });
     return sent.map((c) => (c['args'] ?? {}) as Record<string, unknown>);
   }
@@ -466,6 +468,23 @@ describe('an expect this tool cannot parse', () => {
     expect(() =>
       assertSequenceSteps([{ ref: 'e1', action: 'click', expect: { name: 'order:placed' } }]),
     ).toThrow(/`name`[\s\S]*one of element, text/);
+  });
+
+  /*
+   * The refusal was one fixed sentence with three generic examples, so it never named the key that
+   * failed. `reticle_assert` answers the same predicate with the field that is wrong and the fields
+   * that work, so the step gives the same answer.
+   */
+  it('names the field that failed and the query fields that work', () => {
+    expect(() =>
+      assertSequenceSteps([
+        {
+          target: { testid: 'checkout' },
+          action: 'click',
+          expect: { kind: 'element', query: { css: '.total' } },
+        },
+      ]),
+    ).toThrow(/step 0[\s\S]*unknown field css[\s\S]*query accepts:[^.]*\bscope\b/);
   });
 
   it('still accepts every predicate the grader understands', () => {
