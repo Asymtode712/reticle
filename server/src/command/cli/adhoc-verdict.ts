@@ -172,19 +172,27 @@ export async function acquireLease(
   /** The `.reticle` the lease's runs belong in: the caller's project, not wherever the page resolves. */
   root?: string,
 ): Promise<{ leased: string; zeroInstall: boolean } | { failed: string[] }> {
-  const acquired = await caller.call(
-    ReticleTool.RUN,
-    {
-      tool: ReticleTool.LEASE,
-      args: {
-        action: LeaseAction.ACQUIRE,
-        url,
-        ...(true === headed ? { headed } : {}),
-        ...(root === undefined ? {} : { root }),
+  const ask = (withRoot: boolean): Promise<unknown> =>
+    caller.call(
+      ReticleTool.RUN,
+      {
+        tool: ReticleTool.LEASE,
+        args: {
+          action: LeaseAction.ACQUIRE,
+          url,
+          ...(true === headed ? { headed } : {}),
+          ...(withRoot && root !== undefined ? { root } : {}),
+        },
       },
-    },
-    LEASE_TIMEOUT_MS,
-  );
+      LEASE_TIMEOUT_MS,
+    );
+  let acquired = await ask(true);
+  // A daemon from an older release does not know `root` and refuses the whole call, so the page
+  // was never opened. Ask once more without it: the lease works, only its runs land where that
+  // daemon puts them.
+  if (root !== undefined && REFUSES_ROOT.test(refusalOf(acquired) ?? '')) {
+    acquired = await ask(false);
+  }
   const report = verdictOf(acquired, 'sessionId');
   const sessionId = report?.['sessionId'];
   // `ready: false` still carries a sessionId, but no session is registered under it. Driving it
@@ -197,13 +205,18 @@ export async function acquireLease(
   if ('string' === typeof sessionId) {
     return { leased: sessionId, zeroInstall: true === report?.['zeroInstall'] };
   }
-  const why = verdictOf(acquired, 'error')?.['error'];
   return {
-    failed: [
-      leaseFailedLine(url),
-      'string' === typeof why ? why : (refusalText(acquired) ?? JSON.stringify(acquired)),
-    ],
+    failed: [leaseFailedLine(url), refusalOf(acquired) ?? JSON.stringify(acquired)],
   };
+}
+
+/** The lease refusal an older daemon answers when it does not know the `root` argument. */
+const REFUSES_ROOT = /unknown parameter[^\n]*\broot\b/i;
+
+/** What the lease said no with: the `error` of its payload, else the refusal text. */
+function refusalOf(acquired: unknown): string | undefined {
+  const why = verdictOf(acquired, 'error')?.['error'];
+  return 'string' === typeof why ? why : refusalText(acquired);
 }
 
 /** Hand back a lease `leaseIfNoTab` opened. Best-effort: an expired lease is already gone. */

@@ -361,6 +361,57 @@ describe('a lease that had to supply its own reader', () => {
   });
 });
 
+// A daemon from an older release refuses the `root` argument a newer CLI sends with the lease. The
+// CLI used to print that refusal and stop, before it had opened the page (#1659).
+describe('a daemon that does not know the lease `root`', () => {
+  type Call = { name: string; args: { args: Record<string, unknown> } };
+  const olderDaemon = (): { tool: ToolCaller; calls: Call[] } => {
+    const calls: Call[] = [];
+    return {
+      calls,
+      tool: {
+        call: (name, args) => {
+          calls.push({ name, args } as Call);
+          const sent = (args as Call['args']).args;
+          return Promise.resolve({
+            structuredContent:
+              'root' in sent
+                ? { error: 'unknown parameter for reticle_lease: root' }
+                : { sessionId: 's' },
+          });
+        },
+        close: () => Promise.resolve(),
+      },
+    };
+  };
+
+  it('opens the lease again without `root`', async () => {
+    const daemon = olderDaemon();
+    const got = await acquireLease(daemon.tool, 'http://x/', undefined, '/project');
+
+    expect(got).toEqual({ leased: 's', zeroInstall: false });
+    expect(daemon.calls).toHaveLength(2);
+    expect(daemon.calls[0]?.args.args).toHaveProperty('root', '/project');
+    expect(daemon.calls[1]?.args.args).not.toHaveProperty('root');
+  });
+
+  it('does not retry a refusal that is about something else', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolCaller = {
+      call: (name, args) => {
+        calls.push({ name, args });
+        return Promise.resolve({ structuredContent: { error: 'no browser available' } });
+      },
+      close: () => Promise.resolve(),
+    };
+
+    const got = await acquireLease(tool, 'http://x/', undefined, '/project');
+
+    expect(got).toHaveProperty('failed');
+    expect(calls).toHaveLength(1);
+  });
+});
+
 /*
  * `reticle verify <url>` on an app whose tab never connected (a page CSP blocked the reader's
  * socket) answered `sessionId 'lease-…' names no session`. The lease said `ready: false` with the
