@@ -77,6 +77,7 @@ import { runInit, buildNodeIo, InitFailure, type InitResult } from '@reticlehq/i
 import { continueAfterInit } from './setup/init/init-runtime.js';
 import { initFirstFlow } from './cli/try-command.js';
 import { handleDoctor } from './cli/cli-doctor.js';
+import { writeFirstUseWarnings } from './cli/first-use-checks.js';
 import { serverInitHost } from './setup/init/init-host.js';
 import { describeLicense } from '@/features/license/license.js';
 import {
@@ -176,6 +177,12 @@ async function handleInit(parsed: {
   // RETICLE_PORT counts as explicit, as it does for every other command: resolved once here, so the
   // port written into the project and the port the runtime phase binds are the same number.
   const explicit = parsed.port ?? portFromEnv(process.env);
+  // The bridge port matters only when init goes on to start the app.
+  const bridgePort =
+    true === parsed.filesOnly || parsed.dryRun
+      ? undefined
+      : (explicit ?? readProjectPort(cwd) ?? RETICLE_DEFAULT_PORT);
+  await writeFirstUseWarnings(bridgePort);
   const port = await portForInit(
     explicit,
     readProjectPort(cwd),
@@ -794,17 +801,21 @@ export function main(): void {
       void handleDoctor(parsed.port);
       break;
     case 'setup-mcp':
-      handleSetupMcp(reportStepFromCli);
+      void writeFirstUseWarnings().then(() => {
+        handleSetupMcp(reportStepFromCli);
+      });
       break;
     case 'setup-install':
-      handleSetupInstall(
-        {
-          runtimeSecs: parsed.runtimeSecs,
-          installSecs: parsed.installSecs,
-          mcp: parsed.mcp,
-        },
-        reportStepFromCli,
-      );
+      void writeFirstUseWarnings().then(() => {
+        handleSetupInstall(
+          {
+            runtimeSecs: parsed.runtimeSecs,
+            installSecs: parsed.installSecs,
+            mcp: parsed.mcp,
+          },
+          reportStepFromCli,
+        );
+      });
       break;
     case 'open':
       handleOpen(parsed.port, parsed.url, parsed.navigate);
@@ -813,8 +824,10 @@ export function main(): void {
       handleDrive(parsed, readProjectId(process.cwd()));
       break;
     case 'verify':
-      handleVerify(parsed, () => {
-        writeCiHint({ automation: currentAutomationHint(process.env), machineOutput: false });
+      void writeFirstUseWarnings().then(() => {
+        handleVerify(parsed, () => {
+          writeCiHint({ automation: currentAutomationHint(process.env), machineOutput: false });
+        });
       });
       break;
     case 'affected':

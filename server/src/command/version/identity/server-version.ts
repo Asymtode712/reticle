@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 interface PackageJson {
   version: string;
   name: string;
+  engines?: { node?: string };
 }
 
 /**
@@ -56,3 +57,6 @@ export const SERVER_VERSION: string = _pkg.version;
  * drift. Self-update installs THIS (never `@reticlehq/core`, which is schema-only and has no bin).
  */
 export const RETICLE_NPM_PACKAGE: string = _pkg.name;
+
+/** The Node.js range this package declares in `engines`, such as `>=20.11`. */
+export const SERVER_NODE_RANGE: string | undefined = _pkg.engines?.node;

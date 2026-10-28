@@ -333,6 +333,8 @@ const REACHES_FOR: Record<string, readonly string[]> = {
     // `verify <url> --expect` opens the url when no tab is on it, by the same rule `reticle open`
     // uses (decideOpen), so the two commands cannot disagree about which tab counts.
     'launch',
+    // The first-use checks compare Node.js to the `engines` floor with the one version compare.
+    'version',
     'answers',
     'binding',
     'suite',
