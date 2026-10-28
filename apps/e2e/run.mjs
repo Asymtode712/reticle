@@ -115,6 +115,9 @@ const ORDER = [
   // tests prove install order against a fake page; only a real browser can prove the page saw it.
   // Serves its own fixture page, like the permissions spec above.
   'lease-init-script-test',
+  // The size a leased page takes, read from inside a real Chromium: headless at the default size,
+  // a requested size kept. Serves its own page, like the specs above.
+  'lease-page-size-test',
   // A refused request stopped in a real Chromium before it leaves, under the production policy.
   // Serves its own page, like the two specs above.
   'lease-production-guard-test',
@@ -188,7 +191,7 @@ if (specs.length === 0) {
 // So the size is recorded, and shrinking the battery costs a deliberate edit to a number a
 // reviewer can see. Growing it costs the same edit, which is the point: both directions are a
 // decision. Measured 2026-09-11.
-const EXPECTED_SPECS = desktop ? 3 : 46;
+const EXPECTED_SPECS = desktop ? 3 : 47;
 // The WHOLE battery is counted, not this shard's slice of it: a shard is a third of the list by
 // design, and the question here is whether the list itself shrank.
 if (listed.length !== EXPECTED_SPECS) {
