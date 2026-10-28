@@ -374,3 +374,29 @@ it('is inconclusive, never a pass, when the matched text is unreadable', async (
   expect(result.inconclusive).toContain('contrast 1.00:1');
   expect(result.assertion).toBe('element.readable');
 });
+
+/**
+ * A page that declared its commands and left match out can never answer one (#1990): the session
+ * refuses the send, and that refusal used to be read as "zero matches". The refusal now names the
+ * SDK and the fix, and is not awaited.
+ */
+it('refuses a match the page does not serve, without asking the page', async () => {
+  let asked = false;
+  const old: PredicateSession = {
+    ...session,
+    sdkVersion: '3.8.2',
+    commands: ['snapshot', 'query'],
+    command() {
+      asked = true;
+      return Promise.resolve({ kind: 'command_result', ok: false, id: 'stub', error: 'stub' });
+    },
+  };
+  await expect(
+    evalElement(old, { role: 'button', name: 'Save' }, undefined, false, true),
+  ).rejects.toThrow(/3\.8\.2.*does not serve 'match'.*reticle update/s);
+  expect(asked).toBe(false);
+  // An SDK too old to declare anything says nothing: silence is unknown, never "serves nothing".
+  const silent: PredicateSession = { ...old, commands: undefined };
+  await evalElement(silent, { role: 'button', name: 'Save' }, undefined, false, false);
+  expect(asked).toBe(true);
+});

@@ -88,6 +88,11 @@ export interface PredicateSession {
    * Optional: a fake that omits it gets its callback back unchanged.
    */
   keepCallerContext?: KeepCallerContextFn;
+  /**
+   * The commands the page DECLARED it can serve, from its hello. Undefined means the SDK is too old
+   * to declare anything, so silence is unknown — read to refuse an unserved command (#1990).
+   */
+  commands?: readonly string[] | undefined;
 }
 
 /**

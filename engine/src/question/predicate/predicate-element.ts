@@ -174,6 +174,22 @@ function describeUnreadable(why: string): string {
   );
 }
 
+/**
+ * Why a match is refused before the round-trip (#1990): the page DECLARED its commands and match is
+ * not one of them, so sending it could only end in a timeout that reads as a slow page.
+ */
+function matchNotServedMessage(
+  sdkVersion: string | undefined,
+  declared: readonly string[],
+): string {
+  const sdk = sdkVersion === undefined ? 'does not serve' : `is ${sdkVersion} and does not serve`;
+  return (
+    `this page's SDK ${sdk} 'match': it declared ${String(declared.length)} command(s) when it ` +
+    "connected and this is not one of them. Update the page's @reticlehq packages: " +
+    '`reticle update` in the app.'
+  );
+}
+
 async function matchOnce(
   session: PredicateSession,
   query: ElementQuery,
@@ -181,6 +197,11 @@ async function matchOnce(
   diagnose?: boolean,
   fullText = false,
 ): Promise<MatchResult> {
+  // A page that declared its commands and left match out can never answer (#1990): the session
+  // refuses the send, and that refusal used to be read as "zero matches". Refuse before the trip.
+  if (session.commands !== undefined && !session.commands.includes(ReticleCommand.MATCH)) {
+    throw new Error(matchNotServedMessage(session.sdkVersion, session.commands));
+  }
   const res = await session.command(ReticleCommand.MATCH, {
     query,
     state,
