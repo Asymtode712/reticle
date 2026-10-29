@@ -30,6 +30,9 @@ import { CdpRealInputProvider, LaunchedRealInputProvider } from './portal/input/
 import type { RealInputProvider } from './portal/input/real-input.js';
 import { BrowserPool } from './portal/pool/browser-pool.js';
 import { playwrightLauncher, resolveMaxContexts } from './portal/pool/playwright-launcher.js';
+import { makePageErrorJournal, type PageErrorJournal } from './portal/pool/page-error-journal.js';
+import type { PooledPageError } from './portal/pool/pool-contract.js';
+import { resolveLeasedSessionId } from './surface/tools/lease-tools.js';
 import {
   readReaderBundle,
   zeroInstallScript as zeroInstallScriptFor,
@@ -60,7 +63,12 @@ export function zeroInstallLoader(reader: InjectedConnect): () => string | undef
   };
 }
 
-export function createBrowserPool(headless: boolean, reader: InjectedConnect): BrowserPool {
+export function createBrowserPool(
+  headless: boolean,
+  reader: InjectedConnect,
+  onPageError?: (leaseId: string, error: PooledPageError) => void,
+  onLeaseClosed?: (leaseId: string) => void,
+): BrowserPool {
   const maxContexts = resolveMaxContexts(process.env[ReticleEnv.MAX_CONTEXTS], cpus().length);
   const genSessionId = (): string =>
     `lease-${
@@ -73,7 +81,40 @@ export function createBrowserPool(headless: boolean, reader: InjectedConnect): B
     genSessionId,
     zeroInstallScript: zeroInstallLoader(reader),
     launchHeaded: playwrightLauncher({ headless: false }),
+    ...(onPageError === undefined ? {} : { onPageError }),
+    ...(onLeaseClosed === undefined ? {} : { onLeaseClosed }),
   });
+}
+
+/**
+ * Journal the uncaught page errors the pool hears into the session that connects for that lease.
+ *
+ * The pool sees every throw its pages make from before the first navigation; the SDK only exists
+ * afterwards. Without this wiring an import-time crash — a blank page with no error text anywhere
+ * (#1966) — was invisible to the agent driving it. Returns the journal so the pool's sink can be
+ * handed over; the bridge hook is registered here.
+ */
+export function attachPageErrorJournal(bridge: Bridge): PageErrorJournal {
+  const journal = makePageErrorJournal({
+    resolveSession: (leaseId) => {
+      // Same resolution the lease tool uses: the lease id, or the id of a session whose URL
+      // carries the lease marker — an app that registered under its own name still reaches its lease.
+      const id = resolveLeasedSessionId(bridge.sessions, leaseId);
+      if (id === undefined) {
+        return undefined;
+      }
+      const session = bridge.sessions.get(id);
+      return session === undefined ? undefined : session;
+    },
+  });
+  bridge.attachSessionCreate((session) => journal.onSessionCreate(session));
+  // The daemon runs for days; both of the journal's maps are keyed by things that end, so both
+  // endings are hooked. The bridge's end hook is additive — the durable journal's teardown runs too.
+  bridge.attachSessionEnd((session) => {
+    journal.onSessionEnd(session.id);
+    return Promise.resolve();
+  });
+  return journal;
 }
 
 /**

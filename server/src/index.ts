@@ -87,6 +87,7 @@ import { readRetainPolicy } from './memory/journal/on-disk/retain-policy.js';
 import type { RealInputProvider } from './portal/input/real-input.js';
 import { log } from './log.js';
 import {
+  attachPageErrorJournal,
   createBrowserPool,
   knownProjectRoots,
   loadHarnessConfig,
@@ -256,6 +257,10 @@ export async function start(options: StartOptions = {}): Promise<RunningServer> 
   // Route CDP-authoritative network detail (drive path only) onto the driven session's journal: the
   // page and the SDK session share an origin, so a NET_DETAIL is pushed to the matching connected session.
   const routeNetworkDetail = makeNetworkDetailRouter(bridge, options.driveUrl);
+  // Journal the uncaught page errors the pool hears — an import-time throw lands before any SDK
+  // exists to see it, and it was previously invisible to the agent (#1966). The bridge hook is
+  // registered here; the pool gets the sink at its creation below.
+  const pageErrorJournal = attachPageErrorJournal(bridge);
   const { realInput, owned } = await resolveRealInput(
     options,
     () => bridge.close(),
@@ -291,7 +296,12 @@ export async function start(options: StartOptions = {}): Promise<RunningServer> 
     const project = new ProjectStore(fs, reticleRoot, { now });
     attachRouteLearning(bridge, projectStoreResolver(fs, project, reticleRoot, now));
     const annotations = new AnnotationStore();
-    pool = createBrowserPool(options.headless ?? true, readerConnect(port, security.token));
+    pool = createBrowserPool(
+      options.headless ?? true,
+      readerConnect(port, security.token),
+      (leaseId, error) => pageErrorJournal.onPoolPageError(leaseId, error),
+      (leaseId) => pageErrorJournal.onLeaseClosed(leaseId),
+    );
     leaseReaper = new LeaseReaper(pool);
     leaseReaper.start();
     /*
@@ -480,6 +490,10 @@ export async function startDaemon(options: StartOptions = {}): Promise<RunningSe
 
   const reaper = new SessionReaper(bridge.sessions);
   reaper.start();
+  // Same page-error journal the `start` path wires: an import-time crash reaches the agent through
+  // it instead of reading as a blank page (#1966). Kept beside the other shared wiring so the two
+  // entry points cannot drift.
+  const pageErrorJournal = attachPageErrorJournal(bridge);
   const { realInput, owned } = await resolveRealInput(
     options,
     () => shared.close(),
@@ -521,7 +535,12 @@ export async function startDaemon(options: StartOptions = {}): Promise<RunningSe
   const project = new ProjectStore(fs, reticleRoot, { now });
   attachRouteLearning(bridge, projectStoreResolver(fs, project, reticleRoot, now));
   const annotations = new AnnotationStore();
-  const pool = createBrowserPool(options.headless ?? true, readerConnect(port, security.token));
+  const pool = createBrowserPool(
+    options.headless ?? true,
+    readerConnect(port, security.token),
+    (leaseId, error) => pageErrorJournal.onPoolPageError(leaseId, error),
+    (leaseId) => pageErrorJournal.onLeaseClosed(leaseId),
+  );
   const leaseReaper = new LeaseReaper(pool);
   leaseReaper.start();
   /*
@@ -774,8 +793,15 @@ export {
 export type { ContradictionFold } from '@reticlehq/engine/disagreement/contradiction-folds.js';
 export { MCP_SSE_PATH, MCP_MESSAGE_PATH } from '@reticlehq/core';
 export { BrowserPool, DEFAULT_LEASE_TTL_MS } from './portal/pool/browser-pool.js';
-export type { Lease, Launcher, PooledBrowser } from './portal/pool/browser-pool.js';
+export type {
+  Lease,
+  Launcher,
+  PooledBrowser,
+  PooledPageError,
+} from './portal/pool/browser-pool.js';
 export { playwrightLauncher, resolveMaxContexts } from './portal/pool/playwright-launcher.js';
+export { makePageErrorJournal, uncaughtIdentity } from './portal/pool/page-error-journal.js';
+export type { JournalableSession, PageErrorJournal } from './portal/pool/page-error-journal.js';
 export { appendReticleParams } from './surface/tools/lease-tools.js';
 export {
   writePid,

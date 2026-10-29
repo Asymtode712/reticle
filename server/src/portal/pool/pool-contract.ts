@@ -22,6 +22,14 @@ export interface PooledPage {
    */
   onConsole?(handler: (text: string) => void): void;
   /**
+   * Fires for each error the page threw with no handler for it — an import-time module throw
+   * included. OPTIONAL like `onConsole`: a fake without it makes the pool hear nothing, which
+   * degrades to the old behaviour instead of inventing an error nobody reported. The handler must
+   * be installed BEFORE the first navigation — an import-time throw lands during `goto`, and a
+   * listener attached after it reads a broken page as healthy (#1966).
+   */
+  onPageError?(handler: (error: PooledPageError) => void): void;
+  /**
    * Capture the page as a PNG, or a JPEG at `jpegQuality` (a live picture, where size matters more). OPTIONAL, like `onConsole`: a fake that does not implement it makes
    * the pool report "no provider", which is the correct degradation — an absent screenshotter must
    * read as "this context cannot be captured", never as a blank image that a visual diff would then
@@ -91,6 +99,15 @@ export interface PooledDialog {
   /** The dialog's message text — kept for diagnostics (`BrowserPool#lastDialogMessage`). */
   readonly message: string;
   dismiss(): Promise<void>;
+}
+
+/**
+ * One uncaught error the page threw, as the engine reported it. The message is the exception text
+ * without the console's `Uncaught ` prefix; the stack is present when the engine had one.
+ */
+export interface PooledPageError {
+  readonly message: string;
+  readonly stack?: string;
 }
 
 export interface InitScriptHandle {

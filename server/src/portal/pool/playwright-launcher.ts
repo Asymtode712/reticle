@@ -184,6 +184,15 @@ function wrapBrowser(browser: Browser, headless: boolean): PooledBrowser {
             bringToFront: () => page.bringToFront(),
             onCrash: (handler) => page.on('crash', handler),
             onConsole: (handler) => page.on('console', (msg) => handler(msg.text())),
+            // Playwright's `pageerror` carries the full exception even when the page's own window
+            // listener never ran — the import-time throw that lands before any SDK is injected.
+            onPageError: (handler) =>
+              page.on('pageerror', (error) =>
+                handler({
+                  message: error.message,
+                  ...(error.stack === undefined ? {} : { stack: error.stack }),
+                }),
+              ),
             onDialog: (handler) =>
               page.on('dialog', (dialog) =>
                 handler({ message: dialog.message(), dismiss: () => dialog.dismiss() }),

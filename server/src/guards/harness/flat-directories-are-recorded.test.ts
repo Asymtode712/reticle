@@ -322,7 +322,11 @@ const OVER_THE_LINE: Readonly<Record<string, number>> = {
   'server/src/portal/input': 14,
   // 11 with `pool-lease.ts`: the lease types and the pool's limits, split out of browser-pool.ts at
   // the 1000-line cap (#1705).
-  'server/src/portal/pool': 11,
+  // 12 with `page-error-journal.ts` (#1966): the uncaught page errors the SDK is never installed in
+  // time to see, buffered per lease and journaled into the session that connects for it.
+  // 13 with `lease-page-error.ts` (#1966): the lease's listener install + release report, split out
+  // of browser-pool.ts at the 1000-line cap, beside its test.
+  'server/src/portal/pool': 13,
   // 22 since `session-verdict-facts.ts` was extracted (the count is source files, not tests): both
   // verdict-producing tools were threading the same session facts into `decideVerified` with the
   // same conditional-spread idiom, and a third fact would have been a third copy. Raised on

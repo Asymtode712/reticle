@@ -40,6 +40,7 @@ export type {
   PooledDialog,
   PooledMockRule,
   PooledPage,
+  PooledPageError,
 } from './pool-contract.js';
 import {
   DEFAULT_LEASE_TTL_MS,
@@ -48,6 +49,7 @@ import {
   MAX_REMEMBERED_REAPED_LEASES,
   NO_HEADED_BROWSER,
   ORPHANED_LEASE_GRACE_MS,
+  navStatusOf,
   pageLoading,
   PoolAtCapacityError,
   type ActiveLease,
@@ -55,6 +57,11 @@ import {
   type BrowserSlot,
   type Lease,
 } from './pool-lease.js';
+import {
+  listenForPageErrors,
+  reportLeaseClosed,
+  type LeasePageErrorHooks,
+} from './lease-page-error.js';
 export {
   DEFAULT_LEASE_TTL_MS,
   NO_HEADED_BROWSER,
@@ -74,6 +81,7 @@ export class BrowserPool {
   readonly #now: () => number;
   readonly #ttl: number;
   readonly #zeroInstall: (() => string | undefined) | undefined;
+  readonly #pageErrorHooks: LeasePageErrorHooks | undefined;
   readonly #navTimeout: number;
 
   readonly #headless: BrowserSlot;
@@ -119,6 +127,7 @@ export class BrowserPool {
     this.#ttl = opts.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS;
     this.#navTimeout = opts.navTimeoutMs ?? DEFAULT_NAV_TIMEOUT_MS;
     this.#zeroInstall = opts.zeroInstallScript;
+    this.#pageErrorHooks = { onPageError: opts.onPageError, onLeaseClosed: opts.onLeaseClosed };
   }
 
   /** The TTL configured for leases — how long an untouched lease lives before the reaper reclaims it. */
@@ -680,6 +689,8 @@ export class BrowserPool {
         }
         void dialog.dismiss();
       });
+      // Listener on BEFORE goto — an import-time throw lands during it (#1966).
+      listenForPageErrors(page, sessionId, this.#pageErrorHooks);
       const marker = leaseMarkerOf(url);
       if (marker?.session === sessionId) {
         await installLeaseMarker(page, sessionId, targetOriginOf(url), marker.project);
@@ -710,22 +721,7 @@ export class BrowserPool {
       // Foreground it: a page opened beside other tabs can start hidden (#1351). Best-effort — a tab
       // that stays hidden is reported by name at the lease, which failing here would lose.
       await page.bringToFront?.().catch(() => undefined);
-      let navStatus: number | undefined;
-      if (null !== navRes && 'object' === typeof navRes && 'status' in navRes) {
-        const s: unknown = (navRes as { status?: unknown }).status;
-        if ('function' === typeof s) {
-          try {
-            const code: unknown = s.call(navRes);
-            if ('number' === typeof code) {
-              navStatus = code;
-            }
-          } catch {
-            // ignore
-          }
-        } else if ('number' === typeof s) {
-          navStatus = s;
-        }
-      }
+      const navStatus = navStatusOf(navRes);
       this.#active.set(sessionId, {
         headed: slot.headed,
         context,
@@ -821,6 +817,7 @@ export class BrowserPool {
       return;
     } // already released or lost to a crash
     this.#active.delete(sessionId);
+    reportLeaseClosed(this.#pageErrorHooks, sessionId);
     // Drop any alias pointing here, or the map grows for the life of the daemon and a later lease
     // reusing that registered name would resolve to a context that is already closed.
     for (const [registered, leaseId] of this.#aliases) {

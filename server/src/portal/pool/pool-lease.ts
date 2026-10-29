@@ -9,6 +9,7 @@ import type {
   PooledBrowser,
   PooledContext,
   PooledPage,
+  PooledPageError,
 } from './pool-contract.js';
 
 /** A leased context+page for one flow. `release` frees the slot and closes the context. */
@@ -60,6 +61,19 @@ export interface BrowserPoolOptions {
    * the ~450KB build is only read if some page ever needs it; undefined when there is none to give.
    */
   zeroInstallScript?: () => string | undefined;
+  /**
+   * Sink for uncaught page errors — an import-time throw the SDK was never installed in time to
+   * see (#1966). Called with the lease id, so the wiring can reach the session that connects for
+   * this lease later. Optional: without it the pool hears errors and drops them, which is the
+   * behaviour the repo had before the sink existed.
+   */
+  onPageError?: (leaseId: string, error: PooledPageError) => void;
+  /**
+   * Sink for lease release — manual release, the reaper, and a crash reclaim all funnel through
+   * it. Lets the wiring drop state it kept FOR that lease (the page-error buffer) instead of
+   * holding it for the life of the daemon. Optional: no sink, nothing to clean up.
+   */
+  onLeaseClosed?: (leaseId: string) => void;
   /**
    * Launches a browser with a window, for a lease somebody wants to watch. Launched only when the
    * first headed lease is asked for. Absent: a headed lease is refused.
@@ -157,4 +171,27 @@ export async function pageLoading(page: PooledPage): Promise<boolean> {
   }
   const state = await page.evaluate('document.readyState');
   return 'string' === typeof state && state !== 'complete';
+}
+
+/**
+ * The HTTP status a navigation ended on, or undefined when the page shape reports none.
+ *
+ * Real Playwright answers `goto` with a response object exposing `status()`; the fakes hand back
+ * whatever they like. A status accessor that THROWS says nothing usable, so it reads as absent
+ * rather than breaking the lease that is otherwise fine.
+ */
+export function navStatusOf(navRes: unknown): number | undefined {
+  if (null === navRes || 'object' !== typeof navRes || !('status' in navRes)) {
+    return undefined;
+  }
+  const s: unknown = (navRes as { status?: unknown }).status;
+  if ('function' === typeof s) {
+    try {
+      const code: unknown = s.call(navRes);
+      return 'number' === typeof code ? code : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return 'number' === typeof s ? s : undefined;
 }

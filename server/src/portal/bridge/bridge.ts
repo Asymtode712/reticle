@@ -152,7 +152,7 @@ export const WS_CLOSE_REASON = {
 } as const;
 
 /** WS close codes + reasons the bridge sends to the SDK (1008 = policy violation, 1013 = try again later). */
-const WS_CLOSE = {
+export const WS_CLOSE = {
   TOO_MANY_HANDSHAKES: [1013, 'too many pending handshakes'],
   HELLO_TIMEOUT: [1008, 'hello timeout'],
   INVALID_MESSAGE: [1008, 'invalid message'],
@@ -272,8 +272,10 @@ export class Bridge {
    */
   readonly #onSessionCreate: Array<(session: Session) => void> = [];
   readonly #onProjectAdopted: Array<(session: Session) => void> = [];
-  /** Fired when a session is removed — flushes its journal tail + persists what it learned. */
-  #onSessionEnd: ((session: Session) => Promise<void>) | undefined;
+  // Fired when a session is removed. ADDITIVE: a single slot meant one teardown silently displaced
+  // the other — the same trap the create-side note describes. The durable journal flushes its tail;
+  // the page-error journal drops the session's dedupe memory.
+  readonly #onSessionEnd: Array<(session: Session) => Promise<void>> = [];
   /** Wired by the daemon: push to the dashboard now, because somebody asked in the panel. */
   #onSyncRequest: (() => void) | undefined;
   #onHarnessRequest: ((request: HarnessRequest, session: Session) => void) | undefined;
@@ -835,7 +837,9 @@ export class Bridge {
           log('session_disconnected', { sessionId: ended.id });
           // Best-effort teardown: flush the journal tail + persist ambient learning. Never awaited here
           // (the socket is already closing) and never allowed to reject into the close handler.
-          void this.#onSessionEnd?.(ended).catch(() => undefined);
+          for (const handler of this.#onSessionEnd) {
+            void handler(ended).catch(() => undefined);
+          }
           // AFTER teardown is started, and deliberately not awaited on it. The payload says a
           // session ended, which is already true here; making it wait for the journal flush would
           // put a hook in the path of a socket close for no gain to the consumer.
@@ -940,12 +944,9 @@ export class Bridge {
   }
 
   /** Register a callback fired the instant a session is created — used to attach the durable journal. */
-  /**
-   * Teardown handler fired when a session is removed (tab closed/disconnected). Without it the journal's
-   * batched tail (< one flush batch) never reaches disk and the learned ambient map is discarded.
-   */
+  /** Teardown when a session is removed (tab closed/disconnected). Additive — every handler runs. */
   attachSessionEnd(handler: (session: Session) => Promise<void>): void {
-    this.#onSessionEnd = handler;
+    this.#onSessionEnd.push(handler);
   }
 
   /**
