@@ -26,6 +26,7 @@ import {
   withChromePassThrough,
   type ElementBox,
 } from '@/portal/input/real-input.js';
+import { widenDocumentCsp } from './csp-widen.js';
 
 /** A key addresses focus, not a point; the gesture driver takes a box for every action. */
 const NO_BOX: ElementBox = { x: 0, y: 0, width: 0, height: 0 };
@@ -219,6 +220,10 @@ function wrapBrowser(browser: Browser, headless: boolean): PooledBrowser {
         addCookies: (cookies) => context.addCookies(cookies),
         grantPermissions: (permissions, opts) => context.grantPermissions(permissions, opts),
         clearPermissions: () => context.clearPermissions(),
+        // On the context, so a page route that falls back still reaches it. See csp-widen.ts.
+        widenCsp: async (origin, onWidened) => {
+          await context.route(ANY_URL, (route) => widenDocumentCsp(route, origin, onWidened));
+        },
         close: () => context.close(),
       };
     },

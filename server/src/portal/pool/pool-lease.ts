@@ -59,8 +59,14 @@ export interface BrowserPoolOptions {
   /**
    * The zero-install reader, built where the daemon knows its own port and pairing token. A thunk so
    * the ~450KB build is only read if some page ever needs it; undefined when there is none to give.
+   * Called with the lease url, because a page off loopback gets its own nonce, not the token.
    */
-  zeroInstallScript?: () => string | undefined;
+  zeroInstallScript?: (url: string) => string | undefined;
+  /**
+   * The WebSocket origin the reader dials (`ws://localhost:<port>`). A lease on a page that is not
+   * on loopback adds it to the page's CSP `connect-src` (#2016). Absent: no page CSP is changed.
+   */
+  daemonOrigin?: string;
   /**
    * Sink for uncaught page errors — an import-time throw the SDK was never installed in time to
    * see (#1966). Called with the lease id, so the wiring can reach the session that connects for
@@ -162,6 +168,8 @@ export interface ActiveLease {
   permissions: readonly string[];
   /** Whether its context accepts any TLS certificate (#1255). Fixed when the context is made. */
   ignoresHTTPSErrors: boolean;
+  /** `widenedFor`: the origin added to this page's CSP `connect-src`, once one was (#2016). */
+  csp: { widenedFor?: string };
 }
 
 /** Whether the page's document has not finished loading. A page that cannot be asked counts as loaded. */

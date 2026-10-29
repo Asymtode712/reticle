@@ -137,7 +137,7 @@ describe('emulating media on a lease', () => {
       },
       { maxContexts: 1, genSessionId: ids },
     );
-    await pool.acquire('http://app.test/', {
+    await pool.acquire('http://localhost:5173/', {
       emulate: {
         reducedMotion: 'reduce',
         colorScheme: 'dark',

@@ -153,6 +153,12 @@ export interface PooledContext {
   grantPermissions?(permissions: string[], opts?: { origin?: string }): Promise<void>;
   /** Drop every permission granted on this context. OPTIONAL, for the same reason. */
   clearPermissions?(): Promise<void>;
+  /**
+   * Add `origin` to the `connect-src` of each top document's CSP, and call `onWidened` when that
+   * changed a response (see `csp-widen.ts`). OPTIONAL: without it a deployed page with a strict CSP
+   * blocks the reader, and the lease says `sdk_never_dialled`, which is true.
+   */
+  widenCsp?(origin: string, onWidened: () => void): Promise<void>;
 }
 
 /** The launched browser. Real Playwright `Browser` satisfies this. */

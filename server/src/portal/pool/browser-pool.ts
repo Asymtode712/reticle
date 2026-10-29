@@ -19,6 +19,7 @@ import {
   grantLeasePermissions,
   grantLocalNetworkAccess,
   readNotificationPermission,
+  widenLeaseCsp,
 } from './context-permissions.js';
 import type {
   InitScriptHandle,
@@ -80,7 +81,8 @@ export class BrowserPool {
   readonly #genId: () => string;
   readonly #now: () => number;
   readonly #ttl: number;
-  readonly #zeroInstall: (() => string | undefined) | undefined;
+  readonly #zeroInstall: ((url: string) => string | undefined) | undefined;
+  readonly #daemonOrigin: string | undefined;
   readonly #pageErrorHooks: LeasePageErrorHooks | undefined;
   readonly #navTimeout: number;
 
@@ -127,6 +129,7 @@ export class BrowserPool {
     this.#ttl = opts.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS;
     this.#navTimeout = opts.navTimeoutMs ?? DEFAULT_NAV_TIMEOUT_MS;
     this.#zeroInstall = opts.zeroInstallScript;
+    this.#daemonOrigin = opts.daemonOrigin;
     this.#pageErrorHooks = { onPageError: opts.onPageError, onLeaseClosed: opts.onLeaseClosed };
   }
 
@@ -170,16 +173,11 @@ export class BrowserPool {
       return undefined;
     }
     for (const [leaseId, lease] of this.#active) {
-      if (lease.owner !== owner) {
-        continue;
-      }
-      let leaseOrigin: string | undefined;
-      try {
-        leaseOrigin = new URL(lease.url).origin;
-      } catch {
-        continue;
-      }
-      if (leaseOrigin !== origin) {
+      if (
+        lease.owner !== owner ||
+        !URL.canParse(lease.url) ||
+        new URL(lease.url).origin !== origin
+      ) {
         continue;
       }
       for (const [alias, id] of this.#aliases) {
@@ -645,10 +643,9 @@ export class BrowserPool {
         await grantLeasePermissions(context, opts.permissions, url);
       }
       await grantLocalNetworkAccess(context, url);
+      const csp = await widenLeaseCsp(context, url, this.#daemonOrigin);
       const page = await context.newPage();
-      // A caller-supplied init script is a stub of the bindings a desktop shell injects, and it has
-      // to exist before the app's first module runs. Installed here — before goto — so the very
-      // first document gets it, and kept for the lease (see hostStub) so a reload keeps it too.
+      // A desktop-shell stub must exist before the app's first module: added before goto, and kept.
       let hostStub: InitScriptHandle | undefined;
       if (opts.initScript !== undefined) {
         const added = await page.addInitScript?.(opts.initScript);
@@ -731,6 +728,7 @@ export class BrowserPool {
         touchedAt: this.#now(),
         permissions: opts.permissions ?? [],
         ignoresHTTPSErrors: true === opts.ignoreHTTPSErrors,
+        csp,
         ...(pending === undefined ? {} : { dialFailureUrl: pending }),
         ...(pendingDialogMessage === undefined ? {} : { lastDialogMessage: pendingDialogMessage }),
         ...(hostStub === undefined || opts.initScript === undefined
@@ -743,7 +741,7 @@ export class BrowserPool {
         ...(navStatus !== undefined ? { navStatus } : {}),
         release: () => this.#release(sessionId),
         injectReader: async (): Promise<boolean> => {
-          const script = this.#zeroInstall?.();
+          const script = this.#zeroInstall?.(url);
           if (script === undefined || page.evaluate === undefined) {
             return false;
           }
@@ -983,6 +981,11 @@ export class BrowserPool {
     for (const waiter of this.#waiters.splice(0)) {
       waiter();
     } // let them re-claim + relaunch
+  }
+
+  /** The origin added to this lease's page CSP `connect-src`, or undefined if none was (#2016). */
+  cspWidenedFor(sessionId: string): string | undefined {
+    return this.#active.get(this.#leaseIdOf(sessionId))?.csp.widenedFor;
   }
 
   /** Whether this lease's context skips certificate checks. A context cannot change it later. */
