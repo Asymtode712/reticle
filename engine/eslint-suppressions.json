@@ -293,14 +293,6 @@
       "count": 1
     }
   },
-  "src/question/predicate/predicate-schema.ts": {
-    "curly": {
-      "count": 23
-    },
-    "no-nested-ternary": {
-      "count": 3
-    }
-  },
   "src/question/predicate/predicate-state.ts": {
     "curly": {
       "count": 4

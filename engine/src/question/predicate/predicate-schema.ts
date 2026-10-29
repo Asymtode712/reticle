@@ -59,35 +59,55 @@ function usedQueryFields(query: ElementQuery): ReadonlySet<string> {
   // returns before `findBySource` is reached, so the predicate could pass for an element other than
   // the one the caller's source location identified. Unclaimed, it falls through to the residual
   // walk and is refused — exactly as `component` already is in the same position.
-  if (query.scope !== undefined) used.add('scope');
-  if (query.attrs !== undefined) used.add('attrs');
-  if (query.self !== undefined) used.add('self');
+  if (query.scope !== undefined) {
+    used.add('scope');
+  }
+  if (query.attrs !== undefined) {
+    used.add('attrs');
+  }
+  if (query.self !== undefined) {
+    used.add('self');
+  }
   // A modifier of the text rule, not a locator: the browser honours it wherever it reads `text`, and
   // the residual text check below is already case-exact.
-  if (query.matchCase !== undefined) used.add('matchCase');
+  if (query.matchCase !== undefined) {
+    used.add('matchCase');
+  }
   // The browser's `self` branch checks subtree text when supplied, but skips every other locator.
   // Mark only text as consumed so role/name/etc. remain residual checks on the returned descriptor.
-  if (true === query.self) return query.text === undefined ? used : used.add('text');
+  if (true === query.self) {
+    return query.text === undefined ? used : used.add('text');
+  }
   if (query.by !== undefined && query.value !== undefined) {
     used.add('by').add('value');
-    if (QueryBy.ROLE === query.by) used.add('name');
+    if (QueryBy.ROLE === query.by) {
+      used.add('name');
+    }
     // `by: "component"` resolves through `findByComponent`, which tries the source stamp first and
     // falls back to the component name — so a `source` written here IS consumed.
     if (QueryBy.COMPONENT === query.by) {
       used.add('component');
-      if (query.source !== undefined) used.add('source');
+      if (query.source !== undefined) {
+        used.add('source');
+      }
     }
     return used;
   }
   // The auto-anchor branch, reached only without `by`+`value`: `source` (precise) then `component`.
   if (query.component !== undefined || query.source !== undefined) {
     used.add('component');
-    if (query.source !== undefined) used.add('source');
+    if (query.source !== undefined) {
+      used.add('source');
+    }
     return used;
   }
-  if (query.role !== undefined) return used.add('role').add('name');
+  if (query.role !== undefined) {
+    return used.add('role').add('name');
+  }
   for (const field of ['text', 'label', 'placeholder', 'testid', 'alt'] as const) {
-    if (query[field] !== undefined) return used.add(field);
+    if (query[field] !== undefined) {
+      return used.add(field);
+    }
   }
   return used;
 }
@@ -138,9 +158,25 @@ function isImage(element: ElementDescriptor): boolean {
  * keep matching it as well, so existing flows and recorded steps using `textbox` continue to match.
  */
 function matchesRole(actual: string, queried: string): boolean {
-  if (actual === queried) return true;
-  if ('textbox' === queried && 'searchbox' === actual) return true;
+  if (actual === queried) {
+    return true;
+  }
+  if ('textbox' === queried && 'searchbox' === actual) {
+    return true;
+  }
   return false;
+}
+
+/**
+ * The one name rule, on this side of the wire (#1839). The browser compares a name it CAN match
+ * through `exactVisibleText` - trim, collapse inner whitespace, compare in NFC - so a name the
+ * locator dropped and the engine enforces back here must answer the same question the same way,
+ * or a check flips its answer with the locator that carried it. Kept in step with
+ * `adapters/realm/browser/src/dom/text-match.ts` by hand: the engine cannot import the browser
+ * adapter, and moving the rule into core would move the wire contract for two lines.
+ */
+function normaliseName(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().normalize('NFC');
 }
 
 const RESIDUAL_CHECKS: Readonly<
@@ -148,7 +184,7 @@ const RESIDUAL_CHECKS: Readonly<
 > = {
   value: (element, want) => (element.value ?? '').trim() === want.trim(),
   role: (element, want) => matchesRole(element.role, want),
-  name: (element, want) => element.name.trim() === want.trim(),
+  name: (element, want) => normaliseName(element.name) === normaliseName(want),
   text: (element, want) => (element.text ?? element.name).includes(want),
   [ALT_FIELD]: (element, want) => {
     const alt = element.attrs?.[ALT_FIELD];
@@ -162,7 +198,9 @@ export function withAltProjected(
   checks: readonly [string, string][],
 ): ElementQuery {
   const attrs = query.attrs ?? [];
-  if (!checks.some(([field]) => ALT_FIELD === field) || attrs.includes(ALT_FIELD)) return query;
+  if (!checks.some(([field]) => ALT_FIELD === field) || attrs.includes(ALT_FIELD)) {
+    return query;
+  }
   return { ...query, attrs: [...attrs, ALT_FIELD] };
 }
 
@@ -179,7 +217,9 @@ export function describeAltOnNonImage(
   elements: readonly ElementDescriptor[],
 ): string | undefined {
   const wantsAlt = checks.some(([field]) => ALT_FIELD === field);
-  if (!wantsAlt || 0 === elements.length || elements.some(isImage)) return undefined;
+  if (!wantsAlt || 0 === elements.length || elements.some(isImage)) {
+    return undefined;
+  }
   const roles = [...new Set(elements.map((element) => element.role))].join(', ');
   return `${ALT_IMAGE_ONLY}, and the element matched is ${roles}, not ${IMAGE_ROLE}. ${ALT_USE_NAME}`;
 }
@@ -208,10 +248,14 @@ export function residualQueryChecks(query: ElementQuery): ResidualQueryChecks {
   // question. Reading them off the query also means the set cannot drift from `ElementQuerySchema`.
   for (const field of Object.keys(query) as (keyof ElementQuery)[]) {
     const want = query[field];
-    if (want === undefined || used.has(field)) continue;
-    if ('string' === typeof want && RESIDUAL_CHECKS[field] !== undefined)
+    if (want === undefined || used.has(field)) {
+      continue;
+    }
+    if ('string' === typeof want && RESIDUAL_CHECKS[field] !== undefined) {
       checks.push([field, want]);
-    else unusable.push(field);
+    } else {
+      unusable.push(field);
+    }
   }
   return { checks, unusable };
 }
@@ -245,16 +289,18 @@ export function satisfiesResiduals(
 
 /** How the element's own reading of a dropped field should be REPORTED back on a failure. */
 export function describeResidual(element: ElementDescriptor, field: string): string {
-  const reading =
-    'value' === field
-      ? (element.value ?? '')
-      : 'text' === field
-        ? (element.text ?? element.name)
-        : 'role' === field
-          ? element.role
-          : ALT_FIELD === field
-            ? (element.attrs?.[ALT_FIELD] ?? NO_ALT_ATTRIBUTE)
-            : element.name;
+  let reading: string;
+  if ('value' === field) {
+    reading = element.value ?? '';
+  } else if ('text' === field) {
+    reading = element.text ?? element.name;
+  } else if ('role' === field) {
+    reading = element.role;
+  } else if (ALT_FIELD === field) {
+    reading = element.attrs?.[ALT_FIELD] ?? NO_ALT_ATTRIBUTE;
+  } else {
+    reading = element.name;
+  }
   return `${element.role} "${element.name}" ${field}=${JSON.stringify(reading)}`;
 }
 
@@ -267,7 +313,9 @@ export function describeResidual(element: ElementDescriptor, field: string): str
  */
 export function predicateFieldsFor(kind: string): readonly string[] {
   const shape = shapeForKind(kind);
-  if (null === shape) return [];
+  if (null === shape) {
+    return [];
+  }
   return Object.keys(shape).filter((field) => 'kind' !== field);
 }
 
@@ -337,7 +385,9 @@ export function predicateGrammar(): Readonly<Record<string, string>> {
  * none of these paths; that is exactly why they are worth a case each.
  */
 export function nestedKeysOf(schema: z.ZodTypeAny | undefined): readonly string[] {
-  if (undefined === schema) return [];
+  if (undefined === schema) {
+    return [];
+  }
   const inner = unwrapSchema(schema);
   // `instanceof z.ZodObject` narrows to ZodObject<any>, whose `.shape` is `any`. Name the shape
   // type so the keys are read off something typed rather than laundering an `any` through
@@ -348,7 +398,9 @@ export function nestedKeysOf(schema: z.ZodTypeAny | undefined): readonly string[
     const options = inner.options as readonly z.ZodTypeAny[];
     return [...new Set(options.flatMap((option) => nestedKeysOf(option)))];
   }
-  if (!(inner instanceof z.ZodObject)) return [];
+  if (!(inner instanceof z.ZodObject)) {
+    return [];
+  }
   return Object.keys((inner as z.ZodObject<z.ZodRawShape>).shape);
 }
 
@@ -388,12 +440,18 @@ export function predicateNestedFieldsFor(
   kind: string,
 ): Readonly<Record<string, readonly string[]>> {
   const shape = shapeForKind(kind);
-  if (null === shape) return {};
+  if (null === shape) {
+    return {};
+  }
   const nested: Record<string, readonly string[]> = {};
   for (const [field, schema] of Object.entries(shape)) {
-    if ('kind' === field) continue;
+    if ('kind' === field) {
+      continue;
+    }
     const keys = nestedKeysOf(schema as z.ZodTypeAny);
-    if (0 < keys.length) nested[field] = keys;
+    if (0 < keys.length) {
+      nested[field] = keys;
+    }
   }
   return nested;
 }
