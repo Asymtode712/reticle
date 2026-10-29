@@ -1,4 +1,4 @@
-import { EventType, URL_RAW, urlForMatch, type ReticleEvent } from '@reticlehq/core';
+import { EventType, NetInitiator, URL_RAW, urlForMatch, type ReticleEvent } from '@reticlehq/core';
 import { asNumber, asString } from '@reticlehq/core';
 import { mergeNetworkDetail } from './network-detail-merge.js';
 
@@ -295,4 +295,44 @@ export function consoleEmptyHint(allConsole: ReticleEvent[]): ConsoleEmptyHint {
     }
   }
   return { totalInWindow: allConsole.length, byLevel };
+}
+
+/**
+ * Did the browser leave for a URL this filter names, inside the window (#1936)?
+ *
+ * A click on `<a download>`, or on a link that the server answers as an attachment, is recorded as a
+ * navigation `NET_PENDING`. The response goes to the download manager. The page never sees its
+ * status, and no `NET_REQUEST` can close the record. A miss over this window is unobservable, not a
+ * failure: the file can be on disk while the net channel shows only the pending record.
+ *
+ * An ordinary link records the same navigation `NET_PENDING`, and there the page DID leave, so a
+ * miss stays a real `no`. A record counts only when it is a download (`download: true`), or when no
+ * later event comes from a different document. A later event with another `documentId` proves that
+ * a new document loaded, so the old page's request did not go to a download.
+ */
+export function departedInWindow(
+  events: readonly ReticleEvent[],
+  since: number,
+  method: string | undefined,
+  urlContains: string | undefined,
+): boolean {
+  return events.some(
+    (e) =>
+      e.type === EventType.NET_PENDING &&
+      e.t >= since &&
+      e.data['initiator'] === NetInitiator.NAVIGATION &&
+      (method === undefined ||
+        asString(e.data['method'])?.toUpperCase() === method.toUpperCase()) &&
+      (urlContains === undefined || urlForMatch(e.data).includes(urlContains)) &&
+      (true === e.data['download'] || !newDocumentAfter(events, e)),
+  );
+}
+
+/** Is there an event after `record` from a document other than the one that emitted it? */
+function newDocumentAfter(events: readonly ReticleEvent[], record: ReticleEvent): boolean {
+  const from = record.documentId;
+  if (from === undefined) {
+    return false;
+  }
+  return events.some((e) => e.t >= record.t && e.documentId !== undefined && e.documentId !== from);
 }

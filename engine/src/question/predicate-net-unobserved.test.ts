@@ -255,3 +255,98 @@ describe('evalNet — a native download is not a missing fetch', () => {
     expect(r.assertion).toBe('net.native-download');
   });
 });
+
+/**
+ * A click that leaves a navigation record, with a filter that names no file suffix (#1936).
+ *
+ * `<a href="/api/export" download>`, or an `<a href>` that the server answers with
+ * `Content-Disposition: attachment`, is recorded as a `NET_PENDING` with the navigation initiator.
+ * The response goes to the download manager, so no `NET_REQUEST` can close it. A `status: 200`
+ * check graded the miss `no` ("no matching call") while the browser saved a real file.
+ */
+describe('evalNet — a navigation record the page cannot see the answer to', () => {
+  function departure(t: number, extra: Record<string, unknown> = {}): ReticleEvent {
+    const data: Record<string, unknown> = {
+      id: 'nav-1',
+      method: 'GET',
+      url: 'https://app.test/api/export',
+      initiator: 'navigation',
+      ...extra,
+    };
+    return { type: EventType.NET_PENDING, t, data } as ReticleEvent;
+  }
+
+  it('grades a status check over a download departure as inconclusive, not no', () => {
+    const r = evalNet([departure(20, { download: true })], {
+      kind: PredicateKind.NET,
+      status: 200,
+      since: 10,
+    });
+
+    expect(r.pass).toBe(false);
+    expect(r.inconclusive).toMatch(/download|navigation/i);
+    expect(r.assertion).toBe('net.native-download');
+  });
+
+  it('does the same for a filter that names the endpoint without a file suffix', () => {
+    const r = evalNet([departure(20)], {
+      kind: PredicateKind.NET,
+      urlContains: '/api/export',
+      status: 200,
+    });
+
+    expect(r.inconclusive).toBeDefined();
+    expect(r.assertion).toBe('net.native-download');
+  });
+
+  it('still fails when the navigation record is for another URL', () => {
+    const r = evalNet([departure(20)], { kind: PredicateKind.NET, urlContains: '/api/orders' });
+
+    expect(r.inconclusive).toBeUndefined();
+  });
+
+  it('still fails when the navigation record is before the window', () => {
+    const r = evalNet([departure(5)], { kind: PredicateKind.NET, status: 200, since: 10 });
+
+    expect(r.inconclusive).toBeUndefined();
+  });
+
+  it('still fails when the method differs from the navigation GET', () => {
+    const r = evalNet([departure(20)], { kind: PredicateKind.NET, method: 'POST' });
+
+    expect(r.inconclusive).toBeUndefined();
+  });
+
+  // A later event from a different document proves that the page left: a plain link navigated.
+  const routeData: Record<string, unknown> = { to: '/orders' };
+  const newDocument = {
+    type: EventType.ROUTE_CHANGE,
+    t: 40,
+    documentId: 'doc-b',
+    data: routeData,
+  } as ReticleEvent;
+
+  it('still fails a plain navigation when a later event comes from a new document', () => {
+    const left = { ...departure(20), documentId: 'doc-a' } as ReticleEvent;
+    const r = evalNet([left, newDocument], { kind: PredicateKind.NET, status: 200, since: 10 });
+
+    expect(r.pass).toBe(false);
+    expect(r.inconclusive).toBeUndefined();
+  });
+
+  it('keeps a download departure inconclusive even when a new document follows', () => {
+    const left = { ...departure(20, { download: true }), documentId: 'doc-a' } as ReticleEvent;
+    const r = evalNet([left, newDocument], { kind: PredicateKind.NET, status: 200, since: 10 });
+
+    expect(r.inconclusive).toBeDefined();
+    expect(r.assertion).toBe('net.native-download');
+  });
+
+  it('keeps a plain navigation inconclusive while every later event is from the same document', () => {
+    const stayed = { ...departure(20), documentId: 'doc-a' } as ReticleEvent;
+    const sameDocument = { ...newDocument, documentId: 'doc-a' } as ReticleEvent;
+    const r = evalNet([stayed, sameDocument], { kind: PredicateKind.NET, status: 200 });
+
+    expect(r.inconclusive).toBeDefined();
+  });
+});
