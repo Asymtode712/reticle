@@ -27,6 +27,7 @@ import {
   type ElementBox,
 } from '@/portal/input/real-input.js';
 import { widenDocumentCsp } from './csp-widen.js';
+import { contextEmulationOf } from './lease-emulation.js';
 
 /** A key addresses focus, not a point; the gesture driver takes a box for every action. */
 const NO_BOX: ElementBox = { x: 0, y: 0, width: 0, height: 0 };
@@ -135,11 +136,12 @@ function wrapBrowser(browser: Browser, headless: boolean): PooledBrowser {
   return {
     isConnected: () => browser.isConnected(),
     newContext: async (opts): Promise<PooledContext> => {
-      // Media and viewport ride on the context, so the first paint of the first page has them.
+      // Media, viewport and pointer ride on the context, so the first paint of the first page has
+      // them. `pointer` becomes `hasTouch` here — see contextEmulationOf.
       const { ignoreHTTPSErrors, ...emulate } = opts ?? {};
       const context = await browser.newContext({
         ...(true === ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
-        ...emulate,
+        ...contextEmulationOf(emulate),
         ...pageViewportOptions(headless, emulate.viewport),
       });
       return {

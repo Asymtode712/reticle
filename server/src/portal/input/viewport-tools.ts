@@ -12,6 +12,7 @@ import type { RealInputProvider } from './real-input.js';
 import type { ToolDef, ToolDeps } from '@/surface/tools/tool-kit.js';
 import {
   ColorScheme,
+  Pointer,
   ReducedMotion,
   type LeaseEmulation,
   type LeaseMedia,
@@ -31,6 +32,13 @@ export const REDUCED_MOTION_ARG = z
   .enum([ReducedMotion.REDUCE, ReducedMotion.NO_PREFERENCE])
   .optional()
   .describe('prefers-reduced-motion for this page: reduce or no-preference.');
+export const POINTER_ARG = z
+  .enum([Pointer.FINE, Pointer.COARSE])
+  .optional()
+  .describe(
+    'The primary pointer this page reports to @media (pointer: ...): fine (a mouse) or coarse (touch). ' +
+      'Settable only when the lease opens, because touch support is fixed for a browser context.',
+  );
 
 const EmulateSchema = z
   .object({
@@ -38,12 +46,15 @@ const EmulateSchema = z
     reducedMotion: REDUCED_MOTION_ARG,
     width: viewportPxSchema.optional(),
     height: viewportPxSchema.optional(),
+    pointer: POINTER_ARG,
   })
   .strict();
 
 export const LEASE_EMULATE_ARG = EmulateSchema.optional().describe(
-  'Open the lease with these set before the first paint: { colorScheme, reducedMotion, width, height }. ' +
-    'A side you leave out keeps its default (1280 by 720). Change them later with reticle_viewport.',
+  'Open the lease with these set before the first paint: { colorScheme, reducedMotion, width, height, pointer }. ' +
+    'A side you leave out keeps its default (1280 by 720). Change the media and the size later with ' +
+    'reticle_viewport; `pointer` cannot change on an open lease, so a touch-only rule needs a lease ' +
+    'acquired with pointer: "coarse".',
 );
 
 /** The media part of what a caller asked for, or undefined when it asked for none. */
@@ -70,14 +81,18 @@ export function leaseEmulationOf(raw: unknown): LeaseEmulation | undefined {
     const field = parsed.error.issues[0]?.path.join('.') ?? 'emulate';
     throw new Error(`emulate.${field}: ${parsed.error.issues[0]?.message ?? 'not valid'}`);
   }
-  const { width, height } = parsed.data;
+  const { width, height, pointer } = parsed.data;
   const media = mediaOf(parsed.data);
   const viewport =
     width === undefined && height === undefined
       ? undefined
       : { width: width ?? DEFAULT_WIDTH, height: height ?? DEFAULT_HEIGHT };
-  if (media === undefined && viewport === undefined) return undefined;
-  return { ...media, ...(viewport === undefined ? {} : { viewport }) };
+  if (media === undefined && viewport === undefined && pointer === undefined) return undefined;
+  return {
+    ...media,
+    ...(viewport === undefined ? {} : { viewport }),
+    ...(pointer === undefined ? {} : { pointer }),
+  };
 }
 
 /** Bounds so a viewport request stays sane (and a typo can't ask for a 1px or 100k-px window). */
@@ -104,12 +119,14 @@ export const VIEWPORT_TOOLS: ToolDef[] = [
       'reproducible across machines — the missing piece of CI-stable visual regression, alongside ' +
       'reticle_visual_diff `masks` and a frozen clock (reticle_clock). Set it once before reticle_screenshot / ' +
       'reticle_visual_diff. On a lease it also sets prefers-color-scheme and prefers-reduced-motion; ' +
-      'give only those to change the media and keep the size. Returns { applied, width, height, observed } or the no-provider recommendation; `observed` is the size the leased page reports after the resize.',
+      'give only those to change the media and keep the size. A `pointer` is refused here: touch support is fixed when a lease opens, so ask for it with reticle_lease acquire `emulate.pointer`. ' +
+      'Returns { applied, width, height, observed } or the no-provider recommendation; `observed` is the size the leased page reports after the resize.',
     inputSchema: {
       width: viewportPxSchema.optional().describe('Viewport width in CSS px (e.g. 1280).'),
       height: viewportPxSchema.optional().describe('Viewport height in CSS px (e.g. 800).'),
       colorScheme: COLOR_SCHEME_ARG,
       reducedMotion: REDUCED_MOTION_ARG,
+      pointer: POINTER_ARG,
       ...sessionIdShape,
     },
     outputSchema: {
@@ -119,11 +136,23 @@ export const VIEWPORT_TOOLS: ToolDef[] = [
       observed: z.object({ width: z.number(), height: z.number() }).optional(),
       colorScheme: z.string().optional(),
       reducedMotion: z.string().optional(),
+      pointer: z.string().optional(),
       ok: z.boolean().optional(),
       reason: z.string().optional(),
       recommendation: z.string().optional(),
     },
     handler: async (deps, args) => {
+      // Touch support is a Playwright context option and a lease is one context, so a pointer can
+      // only be chosen when the lease opens. Said out loud instead of dropped: a silently ignored
+      // `pointer` would hand back a verdict about a touch-only rule that was taken with a mouse.
+      if (args['pointer'] !== undefined) {
+        return {
+          applied: false,
+          ok: false,
+          reason: POINTER_IS_FIXED,
+          recommendation: POINTER_NEEDS_A_NEW_LEASE,
+        };
+      }
       const media = mediaOf(args);
       if (media !== undefined && args['width'] === undefined && args['height'] === undefined) {
         const session = deps.sessions.resolve(asString(args['sessionId']));
@@ -177,6 +206,12 @@ export const VIEWPORT_TOOLS: ToolDef[] = [
 /** The resize went through, but the page still reports another size. */
 const VIEWPORT_NOT_TAKEN =
   'the page still reports the size in `observed` after the resize, so the size was not applied';
+
+/** Touch support rides on the browser context, so an open lease's pointer cannot be changed. */
+const POINTER_IS_FIXED =
+  "a lease's pointer is fixed when its context opens, so it cannot be changed on a live lease";
+const POINTER_NEEDS_A_NEW_LEASE =
+  'Acquire a new lease with emulate.pointer: reticle_lease { action: "acquire", emulate: { pointer: "coarse" } }, then call this again with its sessionId.';
 
 /** prefers-color-scheme and prefers-reduced-motion are set on a leased page only. */
 const MEDIA_NEEDS_A_LEASE =

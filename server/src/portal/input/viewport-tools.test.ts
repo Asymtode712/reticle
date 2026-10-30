@@ -5,7 +5,8 @@ import {
   InputMode,
   VIEWPORT_NO_PROVIDER_RECOMMENDATION,
 } from '@reticlehq/core';
-import { VIEWPORT_TOOLS } from './viewport-tools.js';
+import { VIEWPORT_TOOLS, leaseEmulationOf } from './viewport-tools.js';
+import { contextEmulationOf } from '@/portal/pool/lease-emulation.js';
 import { ReticleTool } from '@reticlehq/core';
 import type { RealInputProvider } from './real-input.js';
 import type { SessionManager } from '@/portal/session/session-manager.js';
@@ -294,5 +295,51 @@ describe('reticle_viewport on a leased tab', () => {
     })) as Record<string, unknown>;
     expect(res['applied']).toBe(false);
     expect(res['observed']).toEqual({ width: 1280, height: 720 });
+  });
+});
+// ── A coarse pointer: chosen when the lease opens, refused on a live one (#1903) ──
+
+describe('a lease emulates a pointer', () => {
+  it('carries pointer: "coarse" through as its own field, so the context can open with it', () => {
+    expect(leaseEmulationOf({ pointer: 'coarse' })).toEqual({ pointer: 'coarse' });
+    expect(leaseEmulationOf({ width: 390, height: 844, pointer: 'coarse' })).toEqual({
+      viewport: { width: 390, height: 844 },
+      pointer: 'coarse',
+    });
+  });
+
+  it('refuses a pointer it does not know by name', () => {
+    expect(() => leaseEmulationOf({ pointer: 'medium' })).toThrow(/emulate\.pointer/);
+  });
+
+  it('becomes hasTouch for Playwright, which has no pointer option', () => {
+    expect(contextEmulationOf({ pointer: 'coarse' })).toEqual({ hasTouch: true });
+    expect(contextEmulationOf({ pointer: 'fine' })).toEqual({ hasTouch: false });
+    // No pointer asked for means no touch option at all, not hasTouch: false.
+    expect(contextEmulationOf({ colorScheme: 'dark' })).toEqual({ colorScheme: 'dark' });
+  });
+
+  it('refuses reticle_viewport { pointer } on a live lease instead of ignoring it', async () => {
+    const calls: unknown[] = [];
+    const pool = {
+      emulateLease: (_id: string, media: unknown) => {
+        calls.push(media);
+        return Promise.resolve(true);
+      },
+      viewportOfLease: () => Promise.resolve({ width: 1280, height: 720 }),
+      setViewportLease: () => Promise.resolve(true),
+    } as unknown as ToolDeps['pool'];
+
+    const res = (await tool().handler(depsWith(undefined, pool), {
+      pointer: 'coarse',
+      width: 390,
+      height: 844,
+    })) as Record<string, unknown>;
+
+    expect(res['applied']).toBe(false);
+    expect(res['ok']).toBe(false);
+    expect(String(res['recommendation'])).toContain('emulate.pointer');
+    // Nothing was applied on the way to the refusal: no resize, no media call.
+    expect(calls).toEqual([]);
   });
 });

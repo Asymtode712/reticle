@@ -14,6 +14,8 @@ export const ColorScheme = {
 export type ColorScheme = (typeof ColorScheme)[keyof typeof ColorScheme];
 export const ReducedMotion = { REDUCE: 'reduce', NO_PREFERENCE: 'no-preference' } as const;
 export type ReducedMotion = (typeof ReducedMotion)[keyof typeof ReducedMotion];
+export const Pointer = { FINE: 'fine', COARSE: 'coarse' } as const;
+export type Pointer = (typeof Pointer)[keyof typeof Pointer];
 
 /** The media features a page reads with matchMedia. */
 export interface LeaseMedia {
@@ -21,9 +23,38 @@ export interface LeaseMedia {
   reducedMotion?: ReducedMotion;
 }
 
-/** What a lease opens with: the media, and a viewport. */
+/** What a lease opens with: the media, a viewport, and the pointer the page reads. */
 export interface LeaseEmulation extends LeaseMedia {
   viewport?: { width: number; height: number };
+  /**
+   * The primary pointer `@media (pointer: ...)` reports. Unlike the media features, it is fixed
+   * when the context opens: Playwright's touch support is a context option, so a live lease cannot
+   * be given one. Without it a touch-only rule could not be reached at all, and a lease answered
+   * every `(pointer: coarse)` query with a mouse (#1903).
+   */
+  pointer?: Pointer;
+}
+
+/** The same emulation in the names Playwright's own context options use. */
+export interface ContextEmulation extends LeaseMedia {
+  viewport?: { width: number; height: number };
+  hasTouch?: boolean;
+}
+
+/**
+ * Translate a lease's emulation into context options. `pointer` is not one of Playwright's: a
+ * coarse primary pointer is what touch support produces, so it travels as `hasTouch`.
+ *
+ * Measured in real headless Chromium: `hasTouch: true` makes `(pointer: coarse)` match and
+ * `(pointer: fine)` stop matching, with `maxTouchPoints` at 1. `isMobile` does the same and also
+ * changes viewport-meta handling, so it is deliberately left out.
+ */
+export function contextEmulationOf(emulate: LeaseEmulation): ContextEmulation {
+  const { pointer, ...rest } = emulate;
+  return {
+    ...rest,
+    ...(pointer === undefined ? {} : { hasTouch: Pointer.COARSE === pointer }),
+  };
 }
 
 /** The page's own layout viewport, read back after a resize. */

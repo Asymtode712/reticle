@@ -125,6 +125,9 @@ const ORDER = [
   // A refused request stopped in a real Chromium before it leaves, under the production policy.
   // Serves its own page, like the two specs above.
   'lease-production-guard-test',
+  // A coarse pointer on a leased context, read as the page reads it: matchMedia and the rule behind
+  // it. Serves its own page, like the three specs above.
+  'lease-pointer-test',
   'atlas-hard-fixture-test',
   // Drives a real session and then checks that the EVENTS describe it — a different question from
   // telemetry-events-test, which only proves each kind can be sent. Owns a browser and writes a flow,
@@ -195,7 +198,7 @@ if (specs.length === 0) {
 // So the size is recorded, and shrinking the battery costs a deliberate edit to a number a
 // reviewer can see. Growing it costs the same edit, which is the point: both directions are a
 // decision. Measured 2026-09-11.
-const EXPECTED_SPECS = desktop ? 3 : 49;
+const EXPECTED_SPECS = desktop ? 3 : 50;
 // The WHOLE battery is counted, not this shard's slice of it: a shard is a third of the list by
 // design, and the question here is whether the list itself shrank.
 if (listed.length !== EXPECTED_SPECS) {
