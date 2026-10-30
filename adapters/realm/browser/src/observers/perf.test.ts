@@ -66,7 +66,7 @@ describe('installPerf', () => {
 
     const perf = t.events.filter((e) => e.type === EventType.PERF).map((e) => e.data);
     expect(perf).toContainEqual({ metric: PerfMetric.LCP, value: 1235, at: 1235 });
-    expect(perf).toContainEqual({ metric: PerfMetric.CLS, value: 0.12, at: 500 });
+    expect(perf).toContainEqual({ metric: PerfMetric.CLS, value: 0.12, shift: 0.12, at: 500 });
     expect(perf).toContainEqual({ metric: PerfMetric.LONGTASK, value: 80, at: 700 });
     expect(perf.filter((p) => p['metric'] === PerfMetric.CLS)).toHaveLength(1);
   });
@@ -83,6 +83,26 @@ describe('installPerf', () => {
     t();
     const cls = t.events.map((e) => e.data).filter((d) => d['metric'] === PerfMetric.CLS);
     expect(cls.map((d) => d['value'])).toEqual([0.1, expect.closeTo(0.15, 5)]); // running total
+    expect(cls.map((d) => d['shift'])).toEqual([0.1, 0.05]); // each entry's own shift (#1784)
+  });
+
+  // Reticle's HUD moving is not the page shifting: an idle dev page with the HUD shown reported a
+  // growing layout shift (#1784).
+  it('skips a shift whose every source is Reticle UI, and counts one that also moved the page', () => {
+    document.body.innerHTML =
+      '<div data-reticle-hud><b id="hud-badge">HUD</b></div><p id="app">x</p>';
+    const hud = document.getElementById('hud-badge');
+    const app = document.getElementById('app');
+    const t = install();
+    const ls = byType('layout-shift');
+    const entry = (value: number, sources: unknown[]) =>
+      ({ value, startTime: 100, hadRecentInput: false, sources }) as unknown as PerformanceEntry;
+    ls?.fire([entry(0.3, [{ node: hud }, { node: hud?.firstChild }])]);
+    ls?.fire([entry(0.1, [{ node: hud }, { node: app }])]);
+    t();
+    document.body.innerHTML = '';
+    const cls = t.events.map((e) => e.data).filter((d) => d['metric'] === PerfMetric.CLS);
+    expect(cls.map((d) => [d['value'], d['shift']])).toEqual([[0.1, 0.1]]);
   });
 
   // The running value says THAT the page shifted; without `sources` an agent had nowhere to look

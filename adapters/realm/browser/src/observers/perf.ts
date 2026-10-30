@@ -92,6 +92,17 @@ function largestShifted(
  * occurred rather than when it was flushed — buffered:true replays pre-install entries, whose emit time
  * would otherwise be install time.
  */
+/** Whether every element a shift moved is Reticle's own UI (HUD, cursor): not the page shifting. */
+function onlyReticleMoved(sources: readonly LayoutShiftSource[] | undefined): boolean {
+  if (sources === undefined || 0 === sources.length) {
+    return false;
+  }
+  return sources.every(({ node }) => {
+    const el = isElement(node) ? node : node?.parentElement;
+    return el !== null && el !== undefined && isReticleOverlay(el);
+  });
+}
+
 export function installPerf(emit: Emit): Teardown {
   if (typeof PerformanceObserver !== 'function') return () => undefined;
   const observers: PerformanceObserver[] = [];
@@ -124,11 +135,17 @@ export function installPerf(emit: Emit): Teardown {
     const ls = e as LayoutShiftEntry;
     // Shifts within 500ms of a user input are expected (not CLS) — the spec's hadRecentInput flag.
     if (true === ls.hadRecentInput) return;
-    cls += ls.value ?? 0;
+    // Reticle's own HUD moving is not the page's layout shift (#1784).
+    if (onlyReticleMoved(ls.sources)) {
+      return;
+    }
+    const shift = ls.value ?? 0;
+    cls += shift;
     const shifted = largestShifted(ls.sources);
     emit(EventType.PERF, {
       metric: PerfMetric.CLS,
       value: cls,
+      shift,
       at: Math.round(e.startTime),
       ...(shifted === undefined ? {} : { shifted }),
     });

@@ -232,6 +232,8 @@ export function causalSummary(
   const signals: string[] = [];
   const fieldsChanged: string[] = [];
   let layoutShift: number | undefined;
+  // The shift inside this window, summed from each entry's own `shift` (#1784).
+  let windowShift: number | undefined;
   let longTasks = 0;
   let ignoredBookkeeping = 0;
 
@@ -304,7 +306,10 @@ export function causalSummary(
         pushUnique(fieldsChanged, data['field']);
         break;
       case EventType.PERF:
-        if (data['metric'] === PerfMetric.CLS && 'number' === typeof data['value']) {
+        if (data['metric'] === PerfMetric.CLS && 'number' === typeof data['shift']) {
+          windowShift = (windowShift ?? 0) + data['shift'];
+        } else if (data['metric'] === PerfMetric.CLS && 'number' === typeof data['value']) {
+          // An SDK older than #1784 sends only the running total: the most it allows is its max.
           layoutShift = Math.max(layoutShift ?? 0, data['value']);
         } else if (data['metric'] === PerfMetric.LONGTASK) {
           longTasks += 1;
@@ -320,6 +325,7 @@ export function causalSummary(
   // store, and shrinking it because the evidence was trimmed would make the transient window read as
   // narrower than it was — the one number here that must survive the trim intact.
   const settle = stateSettle(stateDiffs);
+  const shiftInWindow = windowShift ?? layoutShift;
   return {
     net: {
       total: netTotal,
@@ -342,7 +348,7 @@ export function causalSummary(
       ? {}
       : { fieldsChanged: cap(fieldsChanged, 'fieldsChanged', elided) }),
     ...(0 === Object.keys(elided).length ? {} : { elided }),
-    ...(layoutShift === undefined ? {} : { layoutShift }),
+    ...(shiftInWindow === undefined ? {} : { layoutShift: shiftInWindow }),
     longTasks,
     ...(true === context.stateUnwatched ? { stateUnwatched: true as const } : {}),
     ...(true === context.truncated ? { truncated: true as const } : {}),

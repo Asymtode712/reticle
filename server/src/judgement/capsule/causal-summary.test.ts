@@ -74,6 +74,24 @@ describe('causalSummary', () => {
     expect(summary.longTasks).toBe(1);
   });
 
+  // The CLS `value` is the page's running total since load. Taking its max made every action report
+  // all the shift before it, so the number grew across actions that moved nothing (#1784).
+  it('reports the layout shift inside the action window, not the running total', () => {
+    const summary = causalSummary([
+      e(EventType.PERF, { metric: PerfMetric.CLS, value: 0.42, shift: 0.02, at: 1 }),
+      e(EventType.PERF, { metric: PerfMetric.CLS, value: 0.45, shift: 0.03, at: 2 }),
+    ]);
+    expect(summary.layoutShift).toBeCloseTo(0.05, 10);
+  });
+
+  it('keeps the running-total reading for an SDK that sends no per-entry shift', () => {
+    const summary = causalSummary([
+      e(EventType.PERF, { metric: PerfMetric.CLS, value: 0.42, at: 1 }),
+      e(EventType.PERF, { metric: PerfMetric.CLS, value: 0.45, at: 2 }),
+    ]);
+    expect(summary.layoutShift).toBe(0.45);
+  });
+
   it('reports state/storage as before→after DIFFS, using the shape the observers really emit', () => {
     // STATE_CHANGE is emitted by the store observer as { name, path, value, old } — `value` is the AFTER
     // side. An earlier version of this test invented an {old,new} shape, so stateDiffs silently stayed

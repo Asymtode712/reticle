@@ -233,6 +233,8 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     metric: z.nativeEnum(PerfMetric),
     value: z.number(),
     at: z.number(),
+    // CLS only: this entry's own shift; `value` is the running total since load (#1784).
+    shift: z.number().optional(),
     // CLS only: the element the shift moved most, so the value has somewhere to point (#1266).
     shifted: z.object({ ref: z.string(), selector: z.string() }).optional(),
   }),
