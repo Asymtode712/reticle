@@ -181,6 +181,7 @@ import {
   looksLikeStorageStateExport,
   navFailureMessage,
   scrubSeedFromError,
+  serverAcceptedAfterTimeout,
 } from './lease-seed.js';
 
 /** A fresh, collision-resistant lease id. Uses crypto at the I/O boundary (not pure logic). */
@@ -698,8 +699,15 @@ export const LEASE_ACQUIRE_TOOL: ToolDef = {
           throw new Error(scrubSeedFromError(err.message, validatedSeed));
         }
         // A raw page.goto failure is noisy and leaks the internal URL params — surface a clean,
-        // actionable message instead, one that tells a slow first compile from a missing app.
-        throw new Error(navFailureMessage(url, err, validatedSeed));
+        // actionable message instead, one that tells a slow first compile from a missing app. A
+        // timeout on a port that accepted the connection is a server still compiling (#2005).
+        const accepted = await serverAcceptedAfterTimeout(
+          url,
+          err,
+          validatedSeed,
+          deps.portAccepts,
+        );
+        throw new Error(navFailureMessage(url, err, validatedSeed, accepted));
       }
       // Wait for the leased tab's SDK to connect so the returned sessionId is usable right away.
       // Resolved rather than assumed: an app that names its own session registers under that name,

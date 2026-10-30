@@ -81,6 +81,7 @@ import {
   readProjectId,
 } from './command/cli/ports/resolve/cli-port.js';
 import { probeLaunchableChromium } from './launch-chromium.js';
+import { portAcceptsConnection } from '@/portal/session/dev-server/dev-server-probe.js';
 import { attachJournal } from './wire-journal.js';
 import { reportOnboardingStep } from './telemetry/onboarding-funnel.js';
 import { readRetainPolicy } from './memory/journal/on-disk/retain-policy.js';
@@ -341,6 +342,7 @@ export async function start(options: StartOptions = {}): Promise<RunningServer> 
       bridgePort: port,
       nonces: bridge.nonces,
       browserProbe: probeLaunchableChromium,
+      portAccepts: portAcceptsConnection,
       // The daemon's OWN project, so a tool can tell "this session is mine" from "this session
       // belongs to a sibling app under the same daemon". contract_save refuses on the second.
       ...(activeProjectId === undefined ? {} : { projectId: activeProjectId }),
@@ -629,6 +631,7 @@ export async function startDaemon(options: StartOptions = {}): Promise<RunningSe
     bridgePort: port,
     nonces: bridge.nonces,
     browserProbe: probeLaunchableChromium,
+    portAccepts: portAcceptsConnection,
     ...agentWiring(bridge.sessions, leaseUrl),
     // A finished verification should not sit behind a one-minute timer — see ToolDeps.onRunPersisted.
     onRunPersisted: (): void => cloudSync.nudge(),

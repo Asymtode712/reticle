@@ -14,7 +14,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   PROBE_HOSTS,
+  PortState,
   anyFamilyServes,
+  portAcceptsConnection,
   probeDevServerStates,
   probeDevServers,
 } from './dev-server-probe.js';
@@ -168,4 +170,21 @@ describe('a dev server on one loopback family only', () => {
       }
     });
   }
+});
+
+// A Next.js dev server compiling its first route accepts the connection and answers nothing (#2005).
+describe('portAcceptsConnection', () => {
+  it('counts a listener that accepted and said nothing, as well as one serving a document', async () => {
+    expect(
+      await portAcceptsConnection(3000, () => Promise.resolve(PortState.CONNECTED_NO_ANSWER)),
+    ).toBe(true);
+    expect(
+      await portAcceptsConnection(3000, () => Promise.resolve(PortState.SERVES_DOCUMENT)),
+    ).toBe(true);
+  });
+
+  it('is false when nothing accepted, and when the probe itself fails', async () => {
+    expect(await portAcceptsConnection(3000, () => Promise.resolve(PortState.CLOSED))).toBe(false);
+    expect(await portAcceptsConnection(3000, () => Promise.reject(new Error('EPERM')))).toBe(false);
+  });
 });

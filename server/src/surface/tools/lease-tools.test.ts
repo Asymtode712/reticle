@@ -20,6 +20,7 @@ import {
   hasOriginLock,
   scrubSeedFromError,
 } from './lease-tools.js';
+import { serverAcceptedAfterTimeout } from './lease-seed.js';
 import {
   LEASE_READY_TIMEOUT_MS,
   awaitLeaseAnswering,
@@ -306,6 +307,84 @@ describe('reticle_lease_acquire failure surfaces a clean message', () => {
       /could not open http:\/\/localhost:3000\/ — the page did not finish loading within 30 s \(navigation timed out\)\. If the app is running, .*retry the acquire\. If it is not running, start it first\./,
     );
     await expect(acquire).rejects.not.toThrow(/is the app running there/);
+  });
+
+  // A Next.js dev server compiling its first route outlasts the 30 s budget while holding the
+  // connection open. "Start it first" there sent agents to start a second dev server (#2005).
+  const timedOutPool = {
+    acquire: () => Promise.reject(new Error('page.goto: Timeout 30000ms exceeded.')),
+    leaseIdOnOrigin: () => undefined,
+    activeCount: () => 0,
+    queuedCount: () => 0,
+  } as unknown as BrowserPool;
+
+  it('a timeout on a port that accepted the connection says the server is compiling, not to start it', async () => {
+    const asked: number[] = [];
+    const portAccepts = (port: number): Promise<boolean> => {
+      asked.push(port);
+      return Promise.resolve(true);
+    };
+    const acquire = tool(ReticleTool.LEASE_ACQUIRE)(
+      { ...baseDeps, pool: timedOutPool, portAccepts },
+      { url: 'http://localhost:3000/' },
+    );
+    await expect(acquire).rejects.toThrow(
+      /within 30 s \(navigation timed out\)\. The server accepted the connection, so it is running and is probably still compiling this route: wait a few seconds, then acquire the lease again\. Do not start another dev server\./,
+    );
+    await expect(acquire).rejects.not.toThrow(/start it first/);
+    expect(asked).toEqual([3000]);
+  });
+
+  it('keeps the start-it advice when nothing accepted the connection', async () => {
+    const acquire = tool(ReticleTool.LEASE_ACQUIRE)(
+      { ...baseDeps, pool: timedOutPool, portAccepts: () => Promise.resolve(false) },
+      { url: 'http://localhost:3000/' },
+    );
+    await expect(acquire).rejects.toThrow(/If it is not running, start it first\./);
+    await expect(acquire).rejects.not.toThrow(/accepted the connection/);
+  });
+});
+
+describe('serverAcceptedAfterTimeout', () => {
+  const timeout = new Error('page.goto: Timeout 30000ms exceeded.');
+  const yes =
+    (asked: number[]) =>
+    (port: number): Promise<boolean> => {
+      asked.push(port);
+      return Promise.resolve(true);
+    };
+
+  it('probes the loopback port of the URL, defaulting by scheme', async () => {
+    const asked: number[] = [];
+    expect(
+      await serverAcceptedAfterTimeout('http://127.0.0.1:5173/a', timeout, undefined, yes(asked)),
+    ).toBe(true);
+    expect(
+      await serverAcceptedAfterTimeout('https://localhost/', timeout, undefined, yes(asked)),
+    ).toBe(true);
+    expect(asked).toEqual([5173, 443]);
+  });
+
+  it('does not probe a remote host, a non-timeout failure, or without a probe', async () => {
+    const asked: number[] = [];
+    const refused = new Error('page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/');
+    expect(
+      await serverAcceptedAfterTimeout('https://app.example.com/', timeout, undefined, yes(asked)),
+    ).toBe(false);
+    expect(
+      await serverAcceptedAfterTimeout('http://localhost:3000/', refused, undefined, yes(asked)),
+    ).toBe(false);
+    expect(
+      await serverAcceptedAfterTimeout('http://localhost:3000/', timeout, undefined, undefined),
+    ).toBe(false);
+    expect(asked).toEqual([]);
+  });
+
+  it('reads a failing probe as no answer', async () => {
+    const failing = (): Promise<boolean> => Promise.reject(new Error('EPERM'));
+    expect(
+      await serverAcceptedAfterTimeout('http://localhost:3000/', timeout, undefined, failing),
+    ).toBe(false);
   });
 });
 

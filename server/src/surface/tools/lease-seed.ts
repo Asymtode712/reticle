@@ -2,7 +2,12 @@
  * Seeded storage for a lease, and the errors a lease's navigation throws: what a caller may see of
  * them without seeing the secrets it seeded. Split from lease-tools.ts, which crossed the line cap.
  */
-import { REDACTED_VALUE, scrubKnownSecrets, type SeedStorage } from '@reticlehq/core';
+import {
+  isLoopbackHostname,
+  REDACTED_VALUE,
+  scrubKnownSecrets,
+  type SeedStorage,
+} from '@reticlehq/core';
 
 function redactExactValue(text: string, value: string): string {
   if (0 === value.length) return text;
@@ -106,6 +111,14 @@ export const NAV_TIMEOUT_ADVICE =
   'If the app is running, a dev server compiling a route for the first time can take longer than ' +
   'that: retry the acquire. If it is not running, start it first.';
 
+/**
+ * What a lease navigation that ran out of time tells the caller when the server accepted the
+ * connection: it is running and most likely compiling the route, so starting it again is wrong (#2005).
+ */
+export const NAV_COMPILING_ADVICE =
+  'The server accepted the connection, so it is running and is probably still compiling this ' +
+  'route: wait a few seconds, then acquire the lease again. Do not start another dev server.';
+
 /** Lead of the timeout sentence, before the budget ("within 30 s", or "in time" when unknown). */
 const NAV_TIMEOUT_LEAD = 'the page did not finish loading';
 const NAV_TIMEOUT_UNKNOWN_BUDGET = 'in time';
@@ -124,7 +137,12 @@ const PLAYWRIGHT_TIMEOUT = /Timeout (\d+)ms exceeded/;
  * hunting for a dev server that is up instead of retrying, so the timeout sentence names both
  * cases and leads with the retry.
  */
-export function navFailureMessage(url: string, err: unknown, seed?: SeedStorage): string {
+export function navFailureMessage(
+  url: string,
+  err: unknown,
+  seed?: SeedStorage,
+  serverAccepted = false,
+): string {
   const reason = cleanNavError(err, seed);
   // A certificate the browser refused is not an app that is down: the server answered, with a cert
   // no CA here vouches for (a self-signed or mkcert dev certificate). Asking "is the app running?"
@@ -137,7 +155,38 @@ export function navFailureMessage(url: string, err: unknown, seed?: SeedStorage)
     budgetMs === undefined
       ? NAV_TIMEOUT_UNKNOWN_BUDGET
       : `within ${String(Number(budgetMs) / 1000)} s`;
-  return `could not open ${url} — ${NAV_TIMEOUT_LEAD} ${within} (${reason}). ${NAV_TIMEOUT_ADVICE}`;
+  const advice = serverAccepted ? NAV_COMPILING_ADVICE : NAV_TIMEOUT_ADVICE;
+  return `could not open ${url} — ${NAV_TIMEOUT_LEAD} ${within} (${reason}). ${advice}`;
+}
+
+/**
+ * Whether the server behind a timed-out lease navigation accepted a connection.
+ *
+ * Only asked after a timeout and only of a loopback URL: the port probe reaches `localhost`, so a
+ * remote host would be answered by whatever listens locally on the same port. Never rejects; any
+ * doubt is `false`, which keeps the generic timeout advice.
+ */
+export async function serverAcceptedAfterTimeout(
+  url: string,
+  err: unknown,
+  seed: SeedStorage | undefined,
+  portAccepts: ((port: number) => Promise<boolean>) | undefined,
+): Promise<boolean> {
+  if (portAccepts === undefined || NAV_TIMED_OUT !== cleanNavError(err, seed)) {
+    return false;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (!isLoopbackHostname(parsed.hostname)) {
+    return false;
+  }
+  const defaultPort = 'https:' === parsed.protocol ? 443 : 80;
+  const port = '' === parsed.port ? defaultPort : Number(parsed.port);
+  return portAccepts(port).catch(() => false);
 }
 
 /** Whether a path is a sign-in page, by its name: `/login`, `/signin`, `/auth/login` and similar. */

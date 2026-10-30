@@ -188,6 +188,19 @@ async function anyFamilyState(
   return PortState.CLOSED;
 }
 
+/**
+ * Whether anything accepted a connection on this port, on either loopback family. Never rejects.
+ *
+ * A server compiling its first route answers `CONNECTED_NO_ANSWER`, and that counts: the lease uses
+ * this to stop telling an agent to start a dev server that is already running (#2005).
+ */
+export async function portAcceptsConnection(
+  port: number,
+  probe: (port: number) => Promise<PortState> = (p) => anyFamilyState(p),
+): Promise<boolean> {
+  return PortState.CLOSED !== (await classifyPort(port, probe));
+}
+
 /** Every candidate port serving a document, in ascending order. Never rejects. */
 export async function probeDevServers(
   ports: readonly number[] = [...DEV_SERVER_PORTS],

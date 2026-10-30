@@ -42,6 +42,12 @@ export interface ToolDeps<Ext = unknown> {
    * the fake-pool lease tests are deliberately runnable without a real Chromium.
    */
   browserProbe?: () => Promise<ChromiumProbe>;
+  /**
+   * Whether something on this loopback port accepted a connection. Asked only after a lease
+   * navigation timed out, to tell a dev server compiling its first route from no server (#2005).
+   * Optional: absent ⇒ the timeout keeps its generic advice.
+   */
+  portAccepts?: (port: number) => Promise<boolean>;
   baselines: BaselineStore;
   recordings: RecordingStore;
   /** on-disk anchored-flow store (.reticle/flows/). */
