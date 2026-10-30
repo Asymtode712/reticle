@@ -89,6 +89,46 @@ describe('reticle_verify_change — it delegates rather than reimplements', () =
    * would be free to drift from the one the CLI and the e2e battery exercise, and the drift would
    * surface as two different answers to the same question.
    */
+  it.each([true, false])(
+    'forwards ignoreHTTPSErrors %s from the public change action to the suite',
+    async (ignoreHTTPSErrors) => {
+      const { TOOLS } = await import('@/surface/tools/tools.js');
+      const publicVerify = TOOLS.find((candidate) => candidate.name === ReticleTool.VERIFY);
+      const verify = FLOW_TOOLS.find((candidate) => candidate.name === ReticleTool.FLOW_VERIFY);
+      if (publicVerify === undefined || verify === undefined) {
+        throw new Error('verification tools missing');
+      }
+      const suite = vi
+        .spyOn(verify, 'handler')
+        .mockResolvedValue({ status: 'pass', total: 1, passed: 1, failed: 0 });
+      const affected = vi
+        .spyOn(await import('./change/flow-sources.js'), 'affectedSavedFlows')
+        .mockReturnValue({ affected: ['checkout'], unknownProvenance: [] });
+      try {
+        const deps = depsWithNoFlows();
+        const args = z.object(publicVerify.inputSchema).parse({
+          action: 'change',
+          files: ['src/Checkout.tsx'],
+          parallel: 2,
+          ignoreHTTPSErrors,
+        });
+        expect(args).toHaveProperty('ignoreHTTPSErrors', ignoreHTTPSErrors);
+        await publicVerify.handler(deps, args);
+        expect(z.object(tool.inputSchema).parse(args)).toHaveProperty(
+          'ignoreHTTPSErrors',
+          ignoreHTTPSErrors,
+        );
+        expect(suite).toHaveBeenCalledWith(
+          deps,
+          expect.objectContaining({ names: ['checkout'], parallel: 2, ignoreHTTPSErrors }),
+        );
+      } finally {
+        affected.mockRestore();
+        suite.mockRestore();
+      }
+    },
+  );
+
   it('reports NO when the covering flows failed', async () => {
     const deps = withFlows({ status: 'fail', total: 3, passed: 2, failed: 1 });
     // Force one affected flow by pretending provenance is unknown for a saved flow.

@@ -273,7 +273,7 @@ export async function acquireLeasedSession(
   pool: {
     acquire: (
       url: string,
-      opts: { sessionId: string; seedStorage?: SeedStorage },
+      opts: { sessionId: string; seedStorage?: SeedStorage; ignoreHTTPSErrors?: boolean },
     ) => Promise<{
       sessionId: string;
       release: () => Promise<void>;
@@ -293,6 +293,7 @@ export async function acquireLeasedSession(
   url: string,
   projectId?: string,
   seedStorage?: SeedStorage,
+  ignoreHTTPSErrors?: boolean,
 ): Promise<{ sessionId: string; release: () => Promise<void> }> {
   const sessionId = newLeaseId();
   let lease;
@@ -300,6 +301,7 @@ export async function acquireLeasedSession(
     lease = await pool.acquire(appendReticleParams(url, sessionId, projectId), {
       sessionId,
       ...(seedStorage !== undefined ? { seedStorage } : {}),
+      ...(true === ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
     });
   } catch (err) {
     throw new Error(

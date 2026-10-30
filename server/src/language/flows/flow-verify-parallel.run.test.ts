@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { ReplayStatus, type FlowReplayResult } from '@reticlehq/core';
 import { ReticleTool } from '@reticlehq/core';
+import { BrowserPool, type Launcher } from '@/portal/pool/browser-pool.js';
 import type { ToolDeps } from '@/surface/tools/tools.js';
 
 const persistSpy = vi.fn().mockResolvedValue('run-id-001');
@@ -32,6 +34,7 @@ vi.mock('../../memory/cloud/cloud-config.js', () => ({
 }));
 
 const { FLOW_TOOLS } = await import('./flow-tools.js');
+const { TOOLS } = await import('@/surface/tools/tools.js');
 
 /**
  * The parallel path in `flow_verify` must persist a `ReticleVerificationRun` artifact — the same one
@@ -75,6 +78,109 @@ describe('parallel flow_verify persists a verification run artifact', () => {
       },
       project: { recordRun: () => Promise.resolve() },
     } as unknown as ToolDeps;
+  });
+
+  it.each([
+    { sessionId: undefined, sourceIgnores: true, expected: { ignoreHTTPSErrors: true } },
+    { sessionId: 'source-alias', sourceIgnores: true, expected: { ignoreHTTPSErrors: true } },
+    { sessionId: undefined, sourceIgnores: false, expected: undefined },
+  ])(
+    'inherits the source lease certificate setting: $sourceIgnores, sessionId: $sessionId',
+    async ({ sessionId, sourceIgnores, expected }) => {
+      const contexts: unknown[] = [];
+      const launcher: Launcher = () =>
+        Promise.resolve({
+          newContext: (options) => {
+            contexts.push(options);
+            return Promise.resolve({
+              newPage: () =>
+                Promise.resolve({
+                  goto: () => Promise.resolve(),
+                  close: () => Promise.resolve(),
+                  onCrash: () => undefined,
+                }),
+              close: () => Promise.resolve(),
+            });
+          },
+          close: () => Promise.resolve(),
+          onDisconnected: () => undefined,
+          isConnected: () => true,
+        });
+      const pool = new BrowserPool(launcher, {
+        maxContexts: 3,
+        genSessionId: () => 'pool-generated',
+      });
+      try {
+        await pool.acquire('https://localhost:3000/app', {
+          sessionId: 'source',
+          ignoreHTTPSErrors: sourceIgnores,
+        });
+        pool.alias('source-alias', 'source');
+        deps.pool = pool;
+        deps.sessions.resolve = () =>
+          ({
+            id: 'source-alias',
+            url: 'https://localhost:3000/app',
+            projectId: 'proj-123',
+          }) as ReturnType<ToolDeps['sessions']['resolve']>;
+        await verify.handler(deps, { parallel: 2, sessionId });
+        expect(contexts).toEqual([expected, expected, expected]);
+        expect(pool.activeCount()).toBe(1);
+      } finally {
+        await pool.shutdown();
+      }
+    },
+  );
+
+  it.each([true, false, undefined])(
+    'accepts ignoreHTTPSErrors %s through reticle_verify without a source lease',
+    async (ignoreHTTPSErrors) => {
+      const publicVerify = TOOLS.find((tool) => tool.name === ReticleTool.VERIFY);
+      if (publicVerify === undefined) {
+        throw new Error('reticle_verify not found');
+      }
+      const acquire = vi.fn((_url: string, opts: { sessionId: string }) =>
+        Promise.resolve({ sessionId: opts.sessionId, release: () => Promise.resolve() }),
+      );
+      deps.pool = {
+        acquire,
+        capacity: () => 4,
+        ignoresHTTPSErrors: () => false,
+      } as unknown as BrowserPool;
+      const args = z.object(publicVerify.inputSchema).parse({
+        action: 'flows',
+        parallel: 2,
+        ignoreHTTPSErrors,
+      });
+      if (ignoreHTTPSErrors !== undefined) {
+        expect(args).toHaveProperty('ignoreHTTPSErrors', ignoreHTTPSErrors);
+      }
+      await publicVerify.handler(deps, args);
+      expect(acquire).toHaveBeenCalledTimes(2);
+      for (const [, options] of acquire.mock.calls) {
+        if (true === ignoreHTTPSErrors) {
+          expect(options).toHaveProperty('ignoreHTTPSErrors', true);
+        } else {
+          expect(options).not.toHaveProperty('ignoreHTTPSErrors');
+        }
+      }
+    },
+  );
+
+  it('keeps certificate checks on when verify explicitly overrides the source lease', async () => {
+    const acquire = vi.fn((_url: string, opts: { sessionId: string }) =>
+      Promise.resolve({ sessionId: opts.sessionId, release: () => Promise.resolve() }),
+    );
+    deps.pool = {
+      acquire,
+      capacity: () => 4,
+      ignoresHTTPSErrors: () => true,
+    } as unknown as BrowserPool;
+    await verify.handler(deps, { parallel: 2, ignoreHTTPSErrors: false });
+    expect(acquire).toHaveBeenCalledTimes(2);
+    for (const [, options] of acquire.mock.calls) {
+      expect(options).not.toHaveProperty('ignoreHTTPSErrors');
+    }
   });
 
   it('calls persistAndSyncVerificationRun when the parallel path runs', async () => {

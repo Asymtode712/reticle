@@ -570,6 +570,12 @@ export const FLOW_TOOLS: ToolDef[] = [
         .describe(
           'Run this many flows at once, each in its own isolated leased browser context (needs the browser pool). Clamped to the pool capacity and the flow count. Omit for the sequential single-tab run.',
         ),
+      ignoreHTTPSErrors: z
+        .boolean()
+        .optional()
+        .describe(
+          'Accept a self-signed or local-CA certificate for parallel flow leases. Omit to inherit the source lease setting; otherwise certificate checks stay on.',
+        ),
       confirmDangerous: confirmDangerousArg('this run of the suite'),
       skipWrites: SKIP_WRITES_ARG,
       sessionId: z
@@ -696,6 +702,10 @@ export const FLOW_TOOLS: ToolDef[] = [
           requested.length > 0
         ) {
           const concurrency = resolveConcurrency(requested.length, pool.capacity(), parallelArg);
+          const ignoreHTTPSErrors =
+            'boolean' === typeof args['ignoreHTTPSErrors']
+              ? args['ignoreHTTPSErrors']
+              : pool.ignoresHTTPSErrors?.(deps.sessions.resolve(sessionId).id);
           /*
            * Captured ONCE, before any flow runs, from the page the agent is already driving.
            *
@@ -718,7 +728,14 @@ export const FLOW_TOOLS: ToolDef[] = [
           );
           const outcomes = await mapWithConcurrency(requested, concurrency, async (flowName) => {
             const start = deps.now();
-            const lease = await acquireLeasedSession(pool, deps.sessions, appUrl, projectId, seed);
+            const lease = await acquireLeasedSession(
+              pool,
+              deps.sessions,
+              appUrl,
+              projectId,
+              seed,
+              ignoreHTTPSErrors,
+            );
             try {
               const replay = await replayAndLearn(deps, {
                 flowName,

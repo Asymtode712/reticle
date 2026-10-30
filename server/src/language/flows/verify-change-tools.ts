@@ -57,6 +57,12 @@ const VERIFY_CHANGE: ToolDef = {
     parallel: workerCountSchema
       .optional()
       .describe('Replay this many affected flows at once (needs the browser pool).'),
+    ignoreHTTPSErrors: z
+      .boolean()
+      .optional()
+      .describe(
+        'Accept a self-signed or local-CA certificate for parallel flow leases. Omit to inherit the source lease setting; otherwise certificate checks stay on.',
+      ),
     sessionId: z
       .string()
       .optional()
@@ -180,6 +186,9 @@ const VERIFY_CHANGE: ToolDef = {
       await verify.handler(deps, {
         names: affected,
         ...(asNumber(args['parallel']) === undefined ? {} : { parallel: args['parallel'] }),
+        ...('boolean' === typeof args['ignoreHTTPSErrors']
+          ? { ignoreHTTPSErrors: args['ignoreHTTPSErrors'] }
+          : {}),
         ...(asString(args['sessionId']) === undefined ? {} : { sessionId: args['sessionId'] }),
       }),
     ) as SuiteResult;

@@ -23,6 +23,8 @@ icon: shield-check
 
 Only `verified: "yes"` is a pass. `unknown` means Reticle could not tell, and `no-fault` means nothing was declared to prove.
 
+For `action: "flows"` and `action: "change"`, `parallel` opens one isolated lease per replayed flow. These leases inherit the source lease's certificate setting. Set `ignoreHTTPSErrors: true` to accept a self-signed or local-CA certificate when the source is not a lease. An explicit `false` keeps certificate checks on.
+
 Replay before you drive: a covered journey re-verifies for a few hundred tokens, where driving it again costs tens of thousands.
 
 From a terminal, `reticle verify <url>` replays the saved flows and exits `0` on pass. See [`reticle verify`](/cli/verify).
