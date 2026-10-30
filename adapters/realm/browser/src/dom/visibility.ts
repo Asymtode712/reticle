@@ -122,7 +122,11 @@ function holdsOpenLayer(portal: Element): boolean {
  * or a closed `<details>`. Shared by `selfHidden` and `isHiddenByAriaOnly` so the checks stay
  * in one place — #1111/#1112 are changing `selfHidden`, and a copy will drift.
  */
-function selfCssHidden(el: Element, style: CSSStyleDeclaration | null): boolean {
+function selfCssHidden(
+  el: Element,
+  style: CSSStyleDeclaration | null,
+  includeVisibility = true,
+): boolean {
   if (isHtmlElement(el) && el.hidden) {
     return true;
   }
@@ -130,11 +134,7 @@ function selfCssHidden(el: Element, style: CSSStyleDeclaration | null): boolean 
     return true;
   }
   if (style !== null) {
-    if (
-      'none' === style.display ||
-      'hidden' === style.visibility ||
-      'collapse' === style.visibility
-    ) {
+    if ('none' === style.display || (includeVisibility && visibilityHidden(style))) {
       return true;
     }
     if (0 === Number.parseFloat(style.opacity || '1') && !stalledFade(el)) {
@@ -145,6 +145,11 @@ function selfCssHidden(el: Element, style: CSSStyleDeclaration | null): boolean 
     }
   }
   return false;
+}
+
+/** CSS computes inherited visibility for each element, including a descendant override. */
+function visibilityHidden(style: CSSStyleDeclaration | null): boolean {
+  return 'hidden' === style?.visibility || 'collapse' === style?.visibility;
 }
 
 /**
@@ -179,7 +184,7 @@ function clippedAway(style: CSSStyleDeclaration): boolean {
 }
 
 /**
- * Whether the element's OWN box hides it — one forced-style resolution, no composed ancestor
+ * Whether the element hides its whole subtree — one forced-style resolution, no composed ancestor
  * walk. The one ancestor reading is `hiddenInsideClosedDetails`, which consults only the nearest
  * `<details>` boundary; composing the chain is still isVisible's job.
  */
@@ -187,14 +192,14 @@ function selfHidden(el: Element, style: CSSStyleDeclaration | null): boolean {
   if ('true' === el.getAttribute('aria-hidden') && !hiddenByAnOverlay(el)) {
     return true;
   }
-  return selfCssHidden(el, style);
+  return selfCssHidden(el, style, false);
 }
 
 /**
  * Whether the element is hidden ONLY because of `aria-hidden="true"` on itself or an ancestor,
  * and not by any CSS/HTML mechanism. Walks the full ancestor chain across shadow boundaries.
  *
- * Returns `false` when ANY ancestor has `display:none`, `visibility:hidden`, `opacity:0`,
+ * Returns `false` when the target has hidden visibility, or any ancestor has `display:none`, `opacity:0`,
  * `[hidden]`, or sits inside a closed `<details>` — in those cases the element is invisible
  * regardless of `aria-hidden`, and blaming the attribute would mislead the caller (#1070).
  */
@@ -206,7 +211,7 @@ export function isHiddenByAriaOnly(el: Element): boolean {
       foundAriaHidden = true;
     }
     const style = current.ownerDocument.defaultView?.getComputedStyle(current) ?? null;
-    if (selfCssHidden(current, style)) {
+    if (selfCssHidden(current, style, current === el)) {
       return false;
     }
     current = parentAcrossShadowBoundary(current);
@@ -227,7 +232,7 @@ export function isRenderedOutsideAriaHidden(el: Element): boolean {
       return false;
     }
     const style = current.ownerDocument.defaultView?.getComputedStyle(current) ?? null;
-    if (selfCssHidden(current, style)) {
+    if (selfCssHidden(current, style, current === el)) {
       return false;
     }
     current = parentAcrossShadowBoundary(current);
@@ -386,8 +391,8 @@ function underKnownHidden(el: Element, memo: Map<Element, VisibilityInfo>): bool
 function ownVisibilityInfo(el: Element, memo: Map<Element, VisibilityInfo>): VisibilityInfo {
   let info = memo.get(el);
   if (info === undefined) {
-    // Hidden composes down the tree, so a node under an ancestor already known hidden is hidden, and
-    // reading its style would only confirm that. A page of hidden editors holds far more nodes than
+    // Subtree hiding composes down the tree. CSS visibility is checked on each target instead, so
+    // a visible descendant can override it. A page of hidden editors holds far more nodes than
     // a page shows, and a text check over it must not pay one style resolution for each of them.
     // Only what the memo already holds is read: this adds no style resolution and no walk of its own,
     // so a lone hidden target still resolves its own style and nothing else.
@@ -624,9 +629,8 @@ function collapsed(el: Element, memo: Map<Element, VisibilityInfo>): boolean {
 }
 
 /**
- * Whether the element and everything under it is hidden: the element, or an ancestor, is hidden by
- * CSS, the `hidden` attribute, a closed `<details>` or `aria-hidden`. Text under such a root cannot be
- * visible, so a text reader can skip the whole subtree instead of asking each node.
+ * Whether a CSS/HTML mechanism hides the whole subtree. A text reader can skip such a root.
+ * CSS visibility is excluded because a descendant can override its inherited value.
  */
 export function isHiddenSubtree(el: Element, memo?: Map<Element, boolean>): boolean {
   return ownVisibilityInfo(el, visibilityInfoMemo(memo)).hidden;
@@ -643,6 +647,7 @@ export function isVisible(el: Element, memo?: Map<Element, boolean>): boolean {
   }
   const info = visibilityInfoMemo(memo);
   const result =
+    !visibilityHidden(ownVisibilityInfo(el, info).style) &&
     visibleBounds(el, info, undefined, true) !== null &&
     !collapsed(el, info) &&
     !backfaceHidden(el, info);

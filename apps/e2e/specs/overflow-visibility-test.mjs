@@ -64,6 +64,8 @@ const html = `<!doctype html><html><head><title>Overflow visibility</title></hea
   <p id="scroll-scroll-text" style="margin:80px 0 0">Scroll scrollport paragraph.</p>
   <button data-testid="scroll-scroll-action">Scroll scrollport action</button>
 </div>
+<div style="visibility:hidden"><p style="visibility:visible">Hidden visibility override.</p></div>
+<div style="visibility:collapse"><p style="visibility:visible">Collapse visibility override.</p></div>
 <script>
 function rect(id) {
   const el = document.getElementById(id);
@@ -199,6 +201,20 @@ try {
     check(`Chromium clips fixed content under ${property}`, layout.controls[property].painted === false);
   }
   check('an inapplicable inline transform lets fixed content escape', layout.controls.inlineFixed.painted === true);
+
+  // A visibility value can be overridden by a child. It must not prune that child's text (#2047).
+  for (const text of ['Hidden visibility override.', 'Collapse visibility override.']) {
+    const visible = await call('reticle_assert', {
+      sessionId, predicate: { kind: 'text', contains: text, visible: true }, timeout_ms: 0,
+    });
+    check(`assert finds visible text under an overridden visibility: ${text}`,
+      visible.pass === true && visible.verified === 'yes', JSON.stringify(visible));
+    const absent = await call('reticle_assert', {
+      sessionId, predicate: { kind: 'text', contains: text, visible: true, absent: true }, timeout_ms: 0,
+    });
+    check(`assert refuses visible-text absence under an overridden visibility: ${text}`,
+      absent.pass === false && absent.verified === 'no', JSON.stringify(absent));
+  }
 
   const first = await call('reticle_query', { sessionId, by: 'text', value: 'First paragraph.' });
   check('the first paragraph is visible', first.count === 1 && first.elements[0]?.visible === true);
