@@ -369,9 +369,42 @@ function visibilityInfoMemo(memo?: Map<Element, boolean>): Map<Element, Visibili
   return info;
 }
 
+/**
+ * Whether an ancestor of `el` is already known to be hidden. A known visible ancestor ends the walk:
+ * resolving it resolved every ancestor above it, and none of them hides.
+ */
+function underKnownHidden(el: Element, memo: Map<Element, VisibilityInfo>): boolean {
+  for (let up = parentAcrossShadowBoundary(el); null !== up; up = parentAcrossShadowBoundary(up)) {
+    const known = memo.get(up);
+    if (known !== undefined) {
+      return known.hidden;
+    }
+  }
+  return false;
+}
+
 function ownVisibilityInfo(el: Element, memo: Map<Element, VisibilityInfo>): VisibilityInfo {
   let info = memo.get(el);
   if (info === undefined) {
+    // Hidden composes down the tree, so a node under an ancestor already known hidden is hidden, and
+    // reading its style would only confirm that. A page of hidden editors holds far more nodes than
+    // a page shows, and a text check over it must not pay one style resolution for each of them.
+    // Only what the memo already holds is read: this adds no style resolution and no walk of its own,
+    // so a lone hidden target still resolves its own style and nothing else.
+    if (underKnownHidden(el, memo)) {
+      info = {
+        hidden: true,
+        style: null,
+        parent: null,
+        clipX: false,
+        clipY: false,
+        scrollX: false,
+        scrollY: false,
+        hasClipping: false,
+      };
+      memo.set(el, info);
+      return info;
+    }
     const style = el.ownerDocument.defaultView?.getComputedStyle(el) ?? null;
     // Own hiding needs no ancestor metadata: preserve the early return for hidden targets,
     // including deeply nested ones. This cached CSS result never stands for clipped geometry.
@@ -588,6 +621,15 @@ function collapsed(el: Element, memo: Map<Element, VisibilityInfo>): boolean {
         (own.clipX && own.clipY && r.width <= 1 && r.height <= 1),
     )
   );
+}
+
+/**
+ * Whether the element and everything under it is hidden: the element, or an ancestor, is hidden by
+ * CSS, the `hidden` attribute, a closed `<details>` or `aria-hidden`. Text under such a root cannot be
+ * visible, so a text reader can skip the whole subtree instead of asking each node.
+ */
+export function isHiddenSubtree(el: Element, memo?: Map<Element, boolean>): boolean {
+  return ownVisibilityInfo(el, visibilityInfoMemo(memo)).hidden;
 }
 
 /** Visibility combines inherited CSS/ARIA hiding with this target's surviving clipping region. */
