@@ -18,6 +18,7 @@ import { capturedRootOf } from './shadow-registry.js';
 import { getAccessibleName, getRole, describe, getStates } from './a11y.js';
 import {
   isHiddenByAriaOnly,
+  isHiddenSubtree,
   isInViewport,
   isRenderedOutsideAriaHidden,
   isVisible,
@@ -59,7 +60,8 @@ const MAX_PRESENT_TESTIDS = 12;
  * leaves ours out, which pointing an agent at "Pause" or "Export" did not.
  */
 function visibleTextOf(el: Element, memo: Map<Element, boolean>): string {
-  if (isNonRendered(el) || isWordsIgnored(el)) {
+  // A hidden root hides its whole subtree: nothing under it is visible, so none of it is read.
+  if (isHiddenSubtree(el, memo) || isNonRendered(el) || isWordsIgnored(el)) {
     return '';
   }
   const visible = isVisible(el, memo);
@@ -69,6 +71,11 @@ function visibleTextOf(el: Element, memo: Map<Element, boolean>): string {
     if (Node.TEXT_NODE === node.nodeType && visible) {
       text += node.textContent ?? '';
     } else if (isElement(node)) {
+      // A hidden child adds no word and no break, and reading its style to ask would cost a style
+      // resolution for each hidden node.
+      if (isHiddenSubtree(node, memo)) {
+        continue;
+      }
       // A child the layout sets apart reads as a separate word: "found by" and "CI" in two flex
       // items with no space node between them read "found byCI", which no phrase check can match.
       const own = visibleTextOf(node, memo);
@@ -300,6 +307,14 @@ function inState(el: Element, state: ElementState, memo?: Map<Element, boolean>)
   // describe). The predicate path is the only consumer that needs it. (#398)
   if (ElementState.IN_VIEWPORT === state) {
     return isInViewport(el, memo);
+  }
+  // `visible` and `hidden` are what `isVisible` answers. `getStates` builds every other state too,
+  // and a hidden candidate has no use for them: a page of hidden editors pays for each one.
+  if (ElementState.VISIBLE === state) {
+    return isVisible(el, memo);
+  }
+  if (ElementState.HIDDEN === state) {
+    return !isVisible(el, memo);
   }
   return getStates(el, isVisible(el, memo)).includes(state);
 }
