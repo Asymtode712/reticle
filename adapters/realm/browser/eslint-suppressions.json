@@ -94,11 +94,6 @@
       "count": 1
     }
   },
-  "src/actions/value-input.ts": {
-    "curly": {
-      "count": 6
-    }
-  },
   "src/activate.test.ts": {
     "curly": {
       "count": 1

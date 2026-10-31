@@ -20,6 +20,7 @@ import {
 } from './danger-context.js';
 import {
   assertEditable,
+  assertNotEditorTextArea,
   assertNotRichText,
   isAutofillSafeTarget,
   setNativeValue,
@@ -426,6 +427,7 @@ async function dispatchOther(
       return false;
     }
     case ActionType.FILL:
+      assertNotEditorTextArea(el, 'fill');
       if (isInput(el) || isTextArea(el)) {
         // A MISSING value is a malformed call, not a request to empty the field: defaulting it to ''
         // wiped a login form's email and reported success. An explicit '' still clears.
@@ -445,6 +447,7 @@ async function dispatchOther(
       assertNotRichText(el, 'fill');
       throw new Error(`cannot fill a <${el.tagName.toLowerCase()}>`);
     case ActionType.TYPE:
+      assertNotEditorTextArea(el, 'type into');
       if (isInput(el) || isTextArea(el)) {
         // Same family as the valueless FILL: a missing `text` appended '' and reported ok:true, so an
         // agent believed it had typed into a field nothing was written to.
@@ -460,6 +463,7 @@ async function dispatchOther(
       assertNotRichText(el, 'type into');
       throw new Error(`cannot type into a <${el.tagName.toLowerCase()}>`);
     case ActionType.CLEAR:
+      assertNotEditorTextArea(el, 'clear');
       if (isInput(el) || isTextArea(el)) {
         return setNativeValue(el, '');
       }

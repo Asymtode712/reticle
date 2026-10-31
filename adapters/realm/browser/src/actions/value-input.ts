@@ -1,5 +1,5 @@
 import { captureValueSetter } from '@/patching/capture-method.js';
-import { type ActionTarget, isHtmlElement, valuePrototypeOf } from '@/dom/realm.js';
+import { type ActionTarget, isHtmlElement, isTextArea, valuePrototypeOf } from '@/dom/realm.js';
 
 /**
  * Writing a value into a field, and the two preconditions that make it honest.
@@ -24,11 +24,15 @@ const NOT_WEBKIT = /Chrome|Chromium|Edg\/|Firefox|Gecko\//;
  * commits only on blur would not, which is why this is limited to password fields.
  */
 export function isAutofillSafeTarget(el: Element, ua: string = navigator.userAgent): boolean {
-  if (!(el instanceof HTMLInputElement)) return false;
+  if (!(el instanceof HTMLInputElement)) {
+    return false;
+  }
   const password =
     'password' === el.type.toLowerCase() ||
     PASSWORD_AUTOCOMPLETE.test(el.getAttribute('autocomplete') ?? '');
-  if (!password || NOT_WEBKIT.test(ua)) return false;
+  if (!password || NOT_WEBKIT.test(ua)) {
+    return false;
+  }
   // Real WebKit reports 600+; Blink froze 537.36, and so do test DOMs that borrow its string.
   return 600 <= Number(/AppleWebKit\/(\d+)/.exec(ua)?.[1] ?? 0);
 }
@@ -70,19 +74,55 @@ export function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value
  */
 function isRichText(el: ActionTarget): boolean {
   const flag = el.getAttribute('contenteditable');
-  if ((isHtmlElement(el) && el.isContentEditable) || (null !== flag && 'false' !== flag))
+  if ((isHtmlElement(el) && el.isContentEditable) || (null !== flag && 'false' !== flag)) {
     return true;
-  if ('textbox' === el.getAttribute('role')) return true;
-  if (!('editContext' in el)) return false;
+  }
+  if ('textbox' === el.getAttribute('role')) {
+    return true;
+  }
+  if (!('editContext' in el)) {
+    return false;
+  }
   const surface = el as HTMLElement & { editContext?: object | null };
   return null !== surface.editContext && undefined !== surface.editContext;
 }
 
-export function assertNotRichText(el: ActionTarget, action: string): void {
-  if (!isRichText(el)) return;
+/** The roots Monaco and CodeMirror render around the hidden `<textarea>` that receives their input. */
+const EDITOR_ROOT = '.monaco-editor, .CodeMirror, .cm-editor';
+
+/**
+ * A `<textarea>` that is the input surface of a code editor, not a plain field.
+ *
+ * Monaco keeps its input in a hidden `<textarea role="textbox">` and merges whatever is written
+ * there with its own model, so a direct value write reports `valueChanged:true` while the editor
+ * ends up with the old and new text together. An explicit `role="textbox"` or a known editor root
+ * marks it; a bare `<textarea>` is a real field and still fills.
+ */
+function isEditorTextArea(el: ActionTarget): boolean {
+  if (!isTextArea(el)) {
+    return false;
+  }
+  return 'textbox' === el.getAttribute('role') || null !== el.closest(EDITOR_ROOT);
+}
+
+function refuseEditor(action: string): never {
   throw new Error(
     `cannot ${action} a contenteditable or EditContext editor; use press or an input`,
   );
+}
+
+export function assertNotRichText(el: ActionTarget, action: string): void {
+  if (!isRichText(el)) {
+    return;
+  }
+  refuseEditor(action);
+}
+
+/** Refuse a value write into an editor's `<textarea>` before the plain-field branch takes it. */
+export function assertNotEditorTextArea(el: ActionTarget, action: string): void {
+  if (isEditorTextArea(el)) {
+    refuseEditor(action);
+  }
 }
 
 export function assertEditable(el: HTMLInputElement | HTMLTextAreaElement, action: string): void {

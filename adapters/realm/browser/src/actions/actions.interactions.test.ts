@@ -304,6 +304,36 @@ describe('a contenteditable target is refused legibly', () => {
     expect(el.textContent, 'the editor model must not be written through the DOM').toBe('');
   });
 
+  /**
+   * Monaco keeps its input in a hidden `<textarea role="textbox">`. The plain-field branch used to
+   * take it first, so `fill`/`type`/`clear` wrote the value straight in and reported success while
+   * the editor merged it with its own model.
+   */
+  it.each([
+    ['an explicit role=textbox', '<textarea id="ta" role="textbox">old</textarea>'],
+    ['a Monaco root', '<div class="monaco-editor"><textarea id="ta">old</textarea></div>'],
+    ['a CodeMirror root', '<div class="CodeMirror"><textarea id="ta">old</textarea></div>'],
+  ])('refuses fill, type and clear on a textarea inside %s', async (_name, html) => {
+    document.body.innerHTML = html;
+    const el = document.getElementById('ta') as HTMLTextAreaElement;
+    const ref = refs.refFor(el);
+    await expect(executeAction(ref, 'fill', { value: 'new' })).rejects.toThrow(/EditContext/i);
+    await expect(executeAction(ref, 'type', { text: 'new' })).rejects.toThrow(/EditContext/i);
+    await expect(executeAction(ref, 'clear')).rejects.toThrow(/EditContext/i);
+    expect(el.value, 'the editor input must not be written through the DOM').toBe('old');
+  });
+
+  it('still fills a plain textarea with no editor role or root', async () => {
+    document.body.innerHTML = '<textarea id="ta">old</textarea>';
+    const el = document.getElementById('ta') as HTMLTextAreaElement;
+    await executeAction(refs.refFor(el), 'fill', { value: 'new' });
+    expect(el.value).toBe('new');
+    await executeAction(refs.refFor(el), 'type', { text: '!' });
+    expect(el.value).toBe('new!');
+    await executeAction(refs.refFor(el), 'clear');
+    expect(el.value).toBe('');
+  });
+
   it('still names a plain div by its tag', async () => {
     document.body.innerHTML = '<div id="plain">keep</div>';
     const el = document.getElementById('plain') as HTMLElement;
