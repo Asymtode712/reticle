@@ -47,6 +47,20 @@ it('is inconclusive for a state the page SDK predates, without asking the page',
   expect(result.inconclusive).toContain('pressed');
 });
 
+it('is inconclusive for receivesPointer on a page SDK older than 3.10.0', async () => {
+  const old: PredicateSession = { ...session, sdkVersion: '3.9.0' };
+  const result = await evalElement(
+    old,
+    { role: 'button', name: 'Close' },
+    ElementState.RECEIVES_POINTER,
+    true,
+    true,
+  );
+  expect(result.pass).toBe(false);
+  expect(result.inconclusive).toContain('receivesPointer');
+  expect(result.inconclusive).toContain('3.10.0');
+});
+
 it('asks the page when its SDK knows the state, or when no version was reported', async () => {
   for (const sdkVersion of ['3.4.0', '3.4.0-rc.1', undefined]) {
     let asked = false;

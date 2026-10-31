@@ -319,6 +319,7 @@ function substantiveMatches(
 const ELEMENT_STATE_SINCE: Readonly<Partial<Record<ElementState, string>>> = {
   // The key is checked against ElementState by the Record type, so a misspelt state cannot compile.
   pressed: '3.4.0',
+  receivesPointer: '3.10.0',
 };
 
 /** The state, when the page's SDK is older than the first release that answers it. */

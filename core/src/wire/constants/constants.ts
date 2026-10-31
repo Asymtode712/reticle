@@ -839,6 +839,14 @@ export const ElementState = {
    * `visible`/`present` before the scroll, so act_and_wait returns already_true. (#398)
    */
   IN_VIEWPORT: 'inViewport',
+  /**
+   * A pointer at the element's hit point reaches it: the element is visible and in the viewport, and
+   * the topmost app element there is the element, an ancestor or a descendant. Distinct from
+   * `visible`, which means rendered and in layout: a fixed header over a close button leaves it
+   * `visible` and untappable. Reticle's own UI never counts as a cover. An element with no layout box
+   * (no layout to hit-test) is judged by `visible` alone.
+   */
+  RECEIVES_POINTER: 'receivesPointer',
 } as const;
 export type ElementState = (typeof ElementState)[keyof typeof ElementState];
 

@@ -24,6 +24,7 @@ import {
   isVisible,
 } from './visibility.js';
 import { dialogCovering, isIgnored, isReticleOverlay, isWordsIgnored } from './dom-ignore.js';
+import { hitTestOccluder } from './occlusion.js';
 import { isSensitiveKey } from '@/security/serialization.js';
 import { declaredTestids } from '@/registry/capabilities.js';
 import { refs } from './addressing/refs.js';
@@ -301,12 +302,31 @@ function projectAttrs(el: Element, keys: readonly string[]): Record<string, stri
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/**
+ * Whether a pointer at the element's hit point reaches it. The cover test is `hitTestOccluder`, the
+ * one `act` reports `occluded` from, so Reticle's own UI never counts as a cover. An element with no
+ * layout box has nothing to hit-test, and `visible` alone answers for it.
+ */
+function receivesPointer(el: Element, memo?: Map<Element, boolean>): boolean {
+  if (!isVisible(el, memo)) {
+    return false;
+  }
+  const rect = el.getBoundingClientRect();
+  if (0 === rect.width || 0 === rect.height) {
+    return true;
+  }
+  return isInViewport(el, memo) && null === hitTestOccluder(el, rect);
+}
+
 function inState(el: Element, state: ElementState, memo?: Map<Element, boolean>): boolean {
   // inViewport is computed on demand rather than listed in getStates, so it stays assertable without
   // adding a state to every element in every snapshot (it would bloat the wire and churn every
   // describe). The predicate path is the only consumer that needs it. (#398)
   if (ElementState.IN_VIEWPORT === state) {
     return isInViewport(el, memo);
+  }
+  if (ElementState.RECEIVES_POINTER === state) {
+    return receivesPointer(el, memo);
   }
   // `visible` and `hidden` are what `isVisible` answers. `getStates` builds every other state too,
   // and a hidden candidate has no use for them: a page of hidden editors pays for each one.
